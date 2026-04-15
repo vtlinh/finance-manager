@@ -4,7 +4,50 @@ from collections import defaultdict
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from .llm import llm_prompt
+from .llm import llm_structured
+
+# ── JSON schemas for structured LLM output ────────────────────────────────────
+
+_CATEGORIZE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "results": {
+            "type": "array",
+            "description": "One entry per merchant, in the same order as the input",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "index": {"type": "integer", "description": "Merchant index from the input"},
+                    "path": {
+                        "type": "array",
+                        "description": "Hierarchical category path, broadest first",
+                        "items": {"type": "string"},
+                        "minItems": 1,
+                        "maxItems": 4,
+                    },
+                },
+                "required": ["index", "path"],
+            },
+        }
+    },
+    "required": ["results"],
+}
+
+_NORMALIZE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "mapping": {
+            "type": "object",
+            "description": "Maps each input index (as a string) to its consolidated category path",
+            "additionalProperties": {
+                "type": "array",
+                "items": {"type": "string"},
+                "minItems": 1,
+            },
+        }
+    },
+    "required": ["mapping"],
+}
 
 CACHE_FILE = Path(__file__).parent / ".merchant_cache.json"
 
@@ -58,16 +101,13 @@ def categorize_with_llm(groups: list[dict]) -> list[dict]:
 Merchants (index | month | merchant | total amount (count) | existing category):
 {build_prompt(to_classify)}
 
-Return a JSON array with one object per merchant, in the same order, with these fields:
-- index: the merchant index (integer)
-- path: array of strings from broadest to most specific category
-  Use 2 levels for clear-cut merchants (e.g. ["Utilities", "Internet"]).
-  Use 3 levels where meaningful specificity exists (e.g. ["Food & Drink", "Restaurants", "Fast Food"]).
-  Use 4 levels only when genuinely distinct (e.g. ["Shopping", "Clothing", "Kids", "Shoes"]).
-  Do not invent a deeper level just to fill space.
-
-Return ONLY the JSON array, no other text."""
-        for r in llm_prompt(prompt):
+Rules for the path array:
+- Use 2 levels for clear-cut merchants (e.g. ["Utilities", "Internet"]).
+- Use 3 levels where meaningful specificity exists (e.g. ["Food & Drink", "Restaurants", "Fast Food"]).
+- Use 4 levels only when genuinely distinct (e.g. ["Shopping", "Clothing", "Kids", "Shoes"]).
+- Do not invent a deeper level just to fill space."""
+        result = llm_structured(prompt, _CATEGORIZE_SCHEMA, "categorize_merchants")
+        for r in result["results"]:
             name = uncached_names[r["index"]]
             cache[name] = {"path": r["path"]}
 
@@ -157,12 +197,10 @@ def _normalize_categories(cache: dict, merchant_names: set[str]) -> None:
 
 Consolidate them into at most 100 unique paths with at most 15 root categories.
 Merge only truly similar categories; preserve meaningful specificity where it matters.
+All {len(paths_list)} indices must be present in the mapping."""
 
-Return a JSON object where each key is an index (as a string) and each value is the new path (array of strings).
-All {len(paths_list)} indices must be present. Return ONLY the JSON object, no other text."""
-
-    result = llm_prompt(prompt)
-    mapping = {paths_list[int(i)]: new_path for i, new_path in result.items()}
+    result = llm_structured(prompt, _NORMALIZE_SCHEMA, "normalize_categories")
+    mapping = {paths_list[int(i)]: new_path for i, new_path in result["mapping"].items()}
 
     changed = 0
     for name in merchant_names:

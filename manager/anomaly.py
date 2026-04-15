@@ -4,9 +4,35 @@ from collections import defaultdict
 from datetime import date
 from pathlib import Path
 
-from .llm import llm_prompt
+from .llm import llm_structured
+
+_ANOMALY_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "anomalies": {
+            "type": "array",
+            "description": "Notable spending anomalies; empty array if nothing unusual",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "note": {
+                        "type": "string",
+                        "description": "Concise description of the anomaly, including dollar amounts",
+                    },
+                    "amount": {
+                        "type": "number",
+                        "description": "Dollar amount most relevant to the anomaly (positive number)",
+                    },
+                },
+                "required": ["note", "amount"],
+            },
+        }
+    },
+    "required": ["anomalies"],
+}
 
 ANOMALY_CACHE_FILE = Path(__file__).parent / ".anomaly_cache.json"
+ANOMALY_DURATION_WINDOW = 12
 
 
 def load_anomaly_cache() -> dict:
@@ -40,7 +66,7 @@ def detect_monthly_anomalies(groups: list[dict]) -> dict:
 
     to_analyze = [
         m for i, m in enumerate(months)
-        if m not in anomaly_cache and i >= 6  # need at least 6 prior months
+        if m not in anomaly_cache and i >= ANOMALY_DURATION_WINDOW
     ]
 
     if not to_analyze:
@@ -52,7 +78,7 @@ def detect_monthly_anomalies(groups: list[dict]) -> dict:
     for month in to_analyze:
         print(f"  Analyzing {month}...")
         idx = months.index(month)
-        prior = months[max(0, idx - 6):idx]  # up to 6 prior months
+        prior = months[max(0, idx - ANOMALY_DURATION_WINDOW):idx]
 
         all_cats = sorted({
             cat
@@ -80,15 +106,10 @@ def detect_monthly_anomalies(groups: list[dict]) -> dict:
 Identify notable anomalies in {month} vs the reference months.
 Focus on: large increases (>30%), large decreases (>30%), categories that appeared or disappeared.
 Be concise and specific (include dollar amounts).
+Return an empty anomalies list if nothing is unusual."""
 
-Return a JSON array of objects, each with:
-- "note": concise description of the anomaly (string)
-- "amount": the dollar amount most relevant to this anomaly, as a positive number (e.g. the spike amount, the missing spend, or the larger of the two values being compared)
-
-If nothing is unusual, return [].
-Example: [{{"note": "Food & Drink up 52% ($748 vs avg $491)", "amount": 748}}, {{"note": "No Entertainment this month (typically ~$95/month)", "amount": 95}}]"""
-
-        items = llm_prompt(prompt)
+        result = llm_structured(prompt, _ANOMALY_SCHEMA, "report_anomalies")
+        items = result["anomalies"]
         items.sort(key=lambda x: x.get("amount", 0), reverse=True)
         anomaly_cache[month] = [item["note"] for item in items]
 
