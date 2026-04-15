@@ -1,6 +1,9 @@
 import json
+from pathlib import Path
 
 import anthropic
+
+_DIR = Path(__file__).parent
 
 
 def strip_code_fences(text: str) -> str:
@@ -30,6 +33,6 @@ def llm_prompt(prompt: str):
         try:
             return json.loads(text)
         except json.JSONDecodeError:
-            with open(".debug", "w", encoding="utf-8") as f:
+            with open(_DIR / ".debug", "w", encoding="utf-8") as f:
                 f.write(text)
             raise

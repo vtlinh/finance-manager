@@ -5,10 +5,10 @@ sys.stdout.reconfigure(encoding="utf-8")
 
 from dotenv import load_dotenv
 
-from anomaly import detect_monthly_anomalies
-from categorize_transactions import categorize_with_llm, filter_transactions, group_by_month_merchant
-from export_to_sheets import export, print_spreadsheet
-from load_transactions import get_transactions
+from .anomaly import detect_monthly_anomalies
+from .categorize_transactions import categorize_with_llm, filter_transactions, group_by_month_merchant
+from .export_to_sheets import export, print_spreadsheet
+from .load_transactions import get_transactions
 
 load_dotenv()
 
@@ -28,5 +28,9 @@ async def main() -> None:
     export(categorized, anomalies)
 
 
-if __name__ == "__main__":
+def main_sync() -> None:
     asyncio.run(main())
+
+
+if __name__ == "__main__":
+    main_sync()

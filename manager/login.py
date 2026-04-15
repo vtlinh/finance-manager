@@ -11,8 +11,11 @@ from monarchmoney import MonarchMoney, RequireMFAException
 load_dotenv()
 
 
+_DIR = Path(__file__).parent
+
+
 class Monarch:
-    SESSION_FILE = ".monarch_session"
+    SESSION_FILE = str(_DIR / ".monarch_session")
 
     @staticmethod
     async def get_client() -> MonarchMoney:
@@ -51,8 +54,8 @@ class Monarch:
 
 class Google:
     SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
-    CREDS_FILE = "credentials.json"
-    TOKEN_FILE = ".gsheets_token.json"
+    CREDS_FILE = str(_DIR / "credentials.json")
+    TOKEN_FILE = str(_DIR / ".gsheets_token.json")
 
     @staticmethod
     def get_credentials() -> Credentials:

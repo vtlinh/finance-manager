@@ -2,12 +2,14 @@ import csv
 import json
 import os
 from datetime import date, datetime, timedelta
+from pathlib import Path
 from typing import Optional
 
-from login import Monarch
+from .login import Monarch
 
-TRANSACTIONS_FILE = ".monarch_transactions"
-CACHE_FILE = ".monarch_transactions.json"
+_DIR = Path(__file__).parent
+TRANSACTIONS_FILE = _DIR / ".monarch_transactions"
+CACHE_FILE = _DIR / ".monarch_transactions.json"
 MONARCH_LIMIT = 100000
 
 
@@ -125,7 +127,8 @@ async def get_transactions() -> list[dict]:
 
     On first run, fetches the full history by paginating backward.
     On subsequent runs, fetches only new transactions since the last fetch.
-    Falls back to the local cache if the API is unreachable.
+    Falls back to load_from_csv() if the Monarch API is unreachable.
+    Raises if neither source is available.
     """
     store, meta = _load_store()
 
@@ -137,8 +140,14 @@ async def get_transactions() -> list[dict]:
             last_fetched = _parse_date(meta["last_fetched_date"])
             await _fetch_since(mm, last_fetched, store, meta)
         _save_store(store, meta)
+        return sorted(store.values(), key=lambda t: t["date"], reverse=True)
     except Exception as e:
-        print(f"API fetch failed ({e}), using cached data.")
-        raise e
+        print(f"Monarch API unavailable ({e}), falling back to CSV.")
 
-    return sorted(store.values(), key=lambda t: t["date"], reverse=True)
+    if not TRANSACTIONS_FILE.exists():
+        raise FileNotFoundError(
+            f"No CSV fallback found at {TRANSACTIONS_FILE}. "
+            "Fix Monarch credentials or export transactions to that file."
+        )
+
+    return load_from_csv()

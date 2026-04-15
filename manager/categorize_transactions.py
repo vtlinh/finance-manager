@@ -2,10 +2,11 @@ import json
 import os
 from collections import defaultdict
 from datetime import datetime, timedelta
+from pathlib import Path
 
-from llm import llm_prompt
+from .llm import llm_prompt
 
-CACHE_FILE = ".merchant_cache.json"
+CACHE_FILE = Path(__file__).parent / ".merchant_cache.json"
 
 
 def load_cache() -> dict:

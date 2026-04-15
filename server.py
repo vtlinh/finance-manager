@@ -11,6 +11,7 @@ from dotenv import load_dotenv, set_key
 from flask import Flask, Response, jsonify, request, send_file, stream_with_context
 
 BASE_DIR = Path(__file__).parent
+MANAGER_DIR = BASE_DIR / "manager"
 ENV_FILE = BASE_DIR / ".env"
 
 app = Flask(__name__)
@@ -45,10 +46,10 @@ def api_status():
     _reload_env()
     return jsonify({
         "monarch_email_value":   os.environ.get("MONARCH_EMAIL", ""),
-        "monarch_session":       (BASE_DIR / ".monarch_session").exists(),
+        "monarch_session":       (MANAGER_DIR / ".monarch_session").exists(),
         "anthropic_key_value":   os.environ.get("ANTHROPIC_API_KEY", ""),
-        "google_credentials":    (BASE_DIR / "credentials.json").exists(),
-        "google_token":          (BASE_DIR / ".gsheets_token.json").exists(),
+        "google_credentials":    (MANAGER_DIR / "credentials.json").exists(),
+        "google_token":          (MANAGER_DIR / ".gsheets_token.json").exists(),
         "spreadsheet_id_value":  os.environ.get("SPREADSHEET_ID", ""),
     })
 
@@ -77,7 +78,7 @@ def monarch_login():
         mm = MonarchMoney()
         try:
             await mm.login(email, password)
-            mm.save_session(str(BASE_DIR / ".monarch_session"))
+            mm.save_session(str(MANAGER_DIR / ".monarch_session"))
             return {"status": "ok"}
         except RequireMFAException:
             _monarch_pending["email"]    = email
@@ -103,7 +104,7 @@ def monarch_mfa():
         mm = MonarchMoney()
         try:
             await mm.multi_factor_authenticate(email, password, code)
-            mm.save_session(str(BASE_DIR / ".monarch_session"))
+            mm.save_session(str(MANAGER_DIR / ".monarch_session"))
             _monarch_pending.clear()
             return {"status": "ok"}
         except Exception as exc:
@@ -116,7 +117,7 @@ def monarch_mfa():
 def google_credentials():
     if "file" not in request.files:
         return jsonify({"status": "error", "message": "No file received."})
-    request.files["file"].save(str(BASE_DIR / "credentials.json"))
+    request.files["file"].save(str(MANAGER_DIR / "credentials.json"))
     return jsonify({"status": "ok"})
 
 
@@ -129,11 +130,11 @@ def google_auth():
         try:
             from google_auth_oauthlib.flow import InstalledAppFlow  # type: ignore
             flow = InstalledAppFlow.from_client_secrets_file(
-                str(BASE_DIR / "credentials.json"),
+                str(MANAGER_DIR / "credentials.json"),
                 scopes=["https://www.googleapis.com/auth/spreadsheets"],
             )
             creds = flow.run_local_server(port=0)
-            (BASE_DIR / ".gsheets_token.json").write_text(creds.to_json())
+            (MANAGER_DIR / ".gsheets_token.json").write_text(creds.to_json())
             _google_auth_status["done"] = True
         except Exception as exc:
             _google_auth_status["error"] = str(exc)
@@ -154,7 +155,7 @@ def api_run():
 
     def _generate():
         proc = subprocess.Popen(
-            [sys.executable, "-u", str(BASE_DIR / "main.py")],
+            [sys.executable, "-m", "manager.main"],
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
@@ -181,6 +182,10 @@ def api_run():
     )
 
 
-if __name__ == "__main__":
+def run() -> None:
     print("Finance Manager running at \033[1mhttp://localhost:5000\033[0m")
     app.run(host="127.0.0.1", port=5000, debug=False, threaded=True)
+
+
+if __name__ == "__main__":
+    run()

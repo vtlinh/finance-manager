@@ -10,7 +10,7 @@ sys.stdout.reconfigure(encoding="utf-8")
 import gspread
 from dotenv import load_dotenv
 
-from login import Google
+from .login import Google
 
 load_dotenv()
 

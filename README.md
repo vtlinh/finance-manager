@@ -94,7 +94,7 @@ Open [http://localhost:5000](http://localhost:5000) in your browser. The setup w
 ### Option B — Command line
 
 ```bash
-uv run main.py
+uv run finance-run
 ```
 
 The script will:
@@ -113,9 +113,10 @@ The script will:
 
 | File | Purpose |
 |---|---|
-| `.merchant_cache.json` | Merchant → category path mappings (avoids redundant LLM calls) |
-| `.anomaly_cache.json` | Month → anomaly notes (avoids redundant LLM calls) |
-| `.monarch_session` | Saved Monarch Money login session |
-| `.gsheets_token.json` | Saved Google OAuth token |
+| `manager/.merchant_cache.json` | Merchant → category path mappings (avoids redundant LLM calls) |
+| `manager/.anomaly_cache.json` | Month → anomaly notes (avoids redundant LLM calls) |
+| `manager/.monarch_transactions.json` | Cached transaction history from Monarch Money |
+| `manager/.monarch_session` | Saved Monarch Money login session |
+| `manager/.gsheets_token.json` | Saved Google OAuth token |
 
 Delete any of these files to force a fresh fetch on the next run.

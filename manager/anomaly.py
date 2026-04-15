@@ -2,10 +2,11 @@ import json
 import os
 from collections import defaultdict
 from datetime import date
+from pathlib import Path
 
-from llm import llm_prompt
+from .llm import llm_prompt
 
-ANOMALY_CACHE_FILE = ".anomaly_cache.json"
+ANOMALY_CACHE_FILE = Path(__file__).parent / ".anomaly_cache.json"
 
 
 def load_anomaly_cache() -> dict:

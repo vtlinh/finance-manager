@@ -10,3 +10,13 @@ dependencies = [
     "monarchmoney",
     "python-dotenv",
 ]
+
+[project.scripts]
+finance-run = "manager.main:main_sync"
+
+[tool.hatch.build.targets.wheel]
+packages = ["manager"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
