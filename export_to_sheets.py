@@ -133,17 +133,19 @@ def _build_tree(groups: list[dict]) -> tuple[dict, list[str]]:
     months = sorted({g["month"] for g in groups})
 
     def new_node():
-        return {"amounts": defaultdict(float), "children": {}}
+        return {"amounts": defaultdict(float), "children": {}, "merchants": defaultdict(list)}
 
     root = new_node()
     for g in groups:
         path = g.get("path", ["Uncategorized"])
         node = root
         node["amounts"][g["month"]] += g["amount"]
+        node["merchants"][g["month"]].append((g["name"], g["amount"]))
         for part in path:
             node["children"].setdefault(part, new_node())
             node = node["children"][part]
             node["amounts"][g["month"]] += g["amount"]
+            node["merchants"][g["month"]].append((g["name"], g["amount"]))
 
     return root, months
 
@@ -159,19 +161,34 @@ def write_spending_sheet(ws: gspread.Worksheet, groups: list[dict], anomaly_cach
     col_labels = [_month_label(m) for m in months]
 
     rows = [["Category"] + col_labels + [total_label]]
+    notes: list[tuple[int, int, str]] = []  # (row_0based, col_0based, note_text)
+
+    def _note(entries: list[tuple[str, float]]) -> str:
+        sorted_e = sorted(entries, key=lambda x: abs(x[1]), reverse=True)
+        return "\n".join(f"* ${abs(a):,.2f}: {n}" for n, a in sorted_e)
 
     def add_rows(node: dict, depth: int) -> None:
         indent = "  " * depth
         for name, child in sorted(node["children"].items()):
             if not any(child["amounts"].get(m, 0.0) for m in months):
                 continue
+            row_idx = len(rows)
             row = [indent + name]
             year_total = 0.0
-            for m in months:
+            year_merchants: dict[str, float] = defaultdict(float)
+            for col_idx, m in enumerate(months, start=1):
                 amt = -child["amounts"].get(m, 0.0)
                 year_total += amt
                 row.append(round(amt, 2) if amt else "")
+                if amt:
+                    m_merchants = child["merchants"].get(m, [])
+                    if m_merchants:
+                        notes.append((row_idx, col_idx, _note(m_merchants)))
+                    for mname, mamt in m_merchants:
+                        year_merchants[mname] += mamt
             row.append(round(year_total, 2))
+            if year_total and year_merchants:
+                notes.append((row_idx, len(months) + 1, _note(list(year_merchants.items()))))
             rows.append(row)
             add_rows(child, depth + 1)
 
@@ -206,6 +223,24 @@ def write_spending_sheet(ws: gspread.Worksheet, groups: list[dict], anomaly_cach
         {"autoResizeDimensions": {"dimensions": {"sheetId": ws.id, "dimension": "COLUMNS", "startIndex": 0, "endIndex": n_cols}}},
         {"autoResizeDimensions": {"dimensions": {"sheetId": ws.id, "dimension": "ROWS", "startIndex": 0, "endIndex": last_row}}},
     ]})
+
+    # Add merchant breakdown notes (clear first, then set)
+    note_requests: list[dict] = [{
+        "repeatCell": {
+            "range": {"sheetId": ws.id, "startRowIndex": 0, "endRowIndex": last_row, "startColumnIndex": 0, "endColumnIndex": n_cols},
+            "cell": {"note": ""},
+            "fields": "note",
+        }
+    }]
+    for r, c, note_text in notes:
+        note_requests.append({
+            "updateCells": {
+                "range": {"sheetId": ws.id, "startRowIndex": r, "endRowIndex": r + 1, "startColumnIndex": c, "endColumnIndex": c + 1},
+                "rows": [{"values": [{"note": note_text}]}],
+                "fields": "note",
+            }
+        })
+    ws.spreadsheet.batch_update({"requests": note_requests})
 
 
 def write_anomalies_sheet(ws: gspread.Worksheet, anomaly_cache: dict, months: list[str]) -> None:

@@ -207,8 +207,9 @@ def group_by_month_merchant(transactions: list[dict]) -> list[dict]:
     ]
 
 
-def filter_transfers(transactions: list[dict], days_window: int = 3, amount_tolerance: float = 0.01) -> list[dict]:
-    """Remove paired transfer transactions: matching absolute amounts with opposite signs within days_window days."""
+def filter_transactions(transactions: list[dict], days_window: int = 7, amount_tolerance: float = 0.01) -> list[dict]:
+    """Remove dust (< $0.10) and paired transfer transactions (opposite-sign, matching amount within days_window days)."""
+    transactions = [t for t in transactions if abs(t["amount"]) >= 0.1]
     removed: set[int] = set()
 
     for i in range(len(transactions)):
