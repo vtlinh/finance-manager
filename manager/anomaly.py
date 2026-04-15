@@ -1,10 +1,8 @@
-import json
-import os
 from collections import defaultdict
 from datetime import date
-from pathlib import Path
 
-from .llm import llm_structured
+from .llm import llm_batch_structured
+from . import sheets_cache
 
 _ANOMALY_SCHEMA = {
     "type": "object",
@@ -31,20 +29,8 @@ _ANOMALY_SCHEMA = {
     "required": ["anomalies"],
 }
 
-ANOMALY_CACHE_FILE = Path(__file__).parent / ".anomaly_cache.json"
+_CACHE_TAB = "_anomaly_cache"
 ANOMALY_DURATION_WINDOW = 12
-
-
-def load_anomaly_cache() -> dict:
-    if os.path.exists(ANOMALY_CACHE_FILE):
-        with open(ANOMALY_CACHE_FILE, encoding="utf-8") as f:
-            return json.load(f)
-    return {}
-
-
-def save_anomaly_cache(cache: dict) -> None:
-    with open(ANOMALY_CACHE_FILE, "w", encoding="utf-8") as f:
-        json.dump(cache, f, indent=2, sort_keys=True)
 
 
 def _monthly_totals_by_top_cat(groups: list[dict]) -> dict[str, dict[str, float]]:
@@ -58,7 +44,7 @@ def _monthly_totals_by_top_cat(groups: list[dict]) -> dict[str, dict[str, float]
 
 def detect_monthly_anomalies(groups: list[dict]) -> dict:
     """For each uncached past month with 6+ prior months of data, ask LLM for anomaly notes."""
-    anomaly_cache = load_anomaly_cache()
+    anomaly_cache = sheets_cache.read_cache(_CACHE_TAB)
 
     monthly_totals = _monthly_totals_by_top_cat(groups)
     current_month = date.today().strftime("%Y-%m")
@@ -75,8 +61,9 @@ def detect_monthly_anomalies(groups: list[dict]) -> dict:
         return anomaly_cache
 
     print(f"Analyzing {len(to_analyze)} month(s) for spending anomalies...")
+
+    prompts: list[tuple[str, str]] = []
     for month in to_analyze:
-        print(f"  Analyzing {month}...")
         idx = months.index(month)
         prior = months[max(0, idx - ANOMALY_DURATION_WINDOW):idx]
 
@@ -86,7 +73,6 @@ def detect_monthly_anomalies(groups: list[dict]) -> dict:
             for cat in monthly_totals[m]
         })
 
-        # Build comparison table for the prompt
         col_w = 10
         header = "Category".ljust(28) + "".join(m.rjust(col_w) for m in [*prior, f"{month}*"])
         divider = "-" * len(header)
@@ -108,11 +94,15 @@ Focus on: large increases (>30%), large decreases (>30%), categories that appear
 Be concise and specific (include dollar amounts).
 Return an empty anomalies list if nothing is unusual."""
 
-        result = llm_structured(prompt, _ANOMALY_SCHEMA, "report_anomalies")
-        items = result["anomalies"]
+        prompts.append((month, prompt))
+
+    results = llm_batch_structured(prompts, _ANOMALY_SCHEMA, "report_anomalies")
+
+    for month in to_analyze:
+        items = results.get(month, {}).get("anomalies", [])
         items.sort(key=lambda x: x.get("amount", 0), reverse=True)
         anomaly_cache[month] = [item["note"] for item in items]
 
-    save_anomaly_cache(anomaly_cache)
+    sheets_cache.write_cache(_CACHE_TAB, anomaly_cache)
     print(f"Anomaly analysis complete.\n")
     return anomaly_cache

@@ -1,7 +1,24 @@
 import asyncio
+import json
+import os
 import sys
 
-sys.stdout.reconfigure(encoding="utf-8")
+sys.stdout.reconfigure(encoding="utf-8", line_buffering=True)
+
+# Load credentials from temp config file written by the web server.
+# Must run before any other imports that might read os.environ.
+_cfg = os.environ.pop("FINANCE_CONFIG", None)
+if _cfg:
+    try:
+        with open(_cfg, encoding="utf-8") as _f:
+            for _k, _v in json.load(_f).items():
+                if _v:
+                    os.environ[_k] = _v
+    finally:
+        try:
+            os.unlink(_cfg)
+        except OSError:
+            pass
 
 from dotenv import load_dotenv
 

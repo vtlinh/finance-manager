@@ -1,37 +1,30 @@
 import json
-import os
 from collections import defaultdict
 from datetime import datetime, timedelta
-from pathlib import Path
 
 from .llm import llm_structured
+from . import sheets_cache
 
 # ── JSON schemas for structured LLM output ────────────────────────────────────
 
-_CATEGORIZE_SCHEMA = {
+_CATEGORIZE_BATCH_SCHEMA = {
     "type": "object",
     "properties": {
-        "results": {
-            "type": "array",
-            "description": "One entry per merchant, in the same order as the input",
-            "items": {
-                "type": "object",
-                "properties": {
-                    "index": {"type": "integer", "description": "Merchant index from the input"},
-                    "path": {
-                        "type": "array",
-                        "description": "Hierarchical category path, broadest first",
-                        "items": {"type": "string"},
-                        "minItems": 1,
-                        "maxItems": 4,
-                    },
-                },
-                "required": ["index", "path"],
+        "categories": {
+            "type": "object",
+            "description": "Maps each merchant index (as a string) to its category path array",
+            "additionalProperties": {
+                "type": "array",
+                "items": {"type": "string"},
+                "minItems": 1,
+                "maxItems": 4,
             },
         }
     },
-    "required": ["results"],
+    "required": ["categories"],
 }
+
+_BATCH_SIZE = 1000
 
 _NORMALIZE_SCHEMA = {
     "type": "object",
@@ -49,71 +42,68 @@ _NORMALIZE_SCHEMA = {
     "required": ["mapping"],
 }
 
-CACHE_FILE = Path(__file__).parent / ".merchant_cache.json"
+_CACHE_TAB = "_merchant_cache"
 
 
-def load_cache() -> dict:
-    if os.path.exists(CACHE_FILE):
-        with open(CACHE_FILE, encoding="utf-8") as f:
-            cache = json.load(f)
-        # Migrate old format (category + subcategory) to path list
-        for entry in cache.values():
-            if "path" not in entry and "category" in entry:
-                entry["path"] = [entry["category"]]
-                if entry.get("subcategory") and entry["subcategory"] != "Other":
-                    entry["path"].append(entry["subcategory"])
-        return cache
-    return {}
+def _load_cache() -> dict:
+    return sheets_cache.read_cache(_CACHE_TAB)
 
 
-def save_cache(cache: dict) -> None:
-    with open(CACHE_FILE, "w", encoding="utf-8") as f:
-        json.dump(cache, f, indent=2, sort_keys=True)
+def _save_cache(cache: dict) -> None:
+    sheets_cache.write_cache(_CACHE_TAB, cache)
 
 
-def build_prompt(groups: list[dict]) -> str:
-    lines = []
-    for i, g in enumerate(groups):
-        lines.append(f"{i}: {g['month']} | {g['name']} | ${g['amount']:.2f} ({g['count']}x) | {g['category']}")
-    return "\n".join(lines)
-
-
-def categorize_with_llm(groups: list[dict]) -> list[dict]:
-    cache = load_cache()
-    to_be_cached = {g["name"] for g in groups if g["name"] not in cache}
-
-    if to_be_cached:
-        print(f"Sending {len(to_be_cached)} merchant(s) to LLM for categorization..., {len(cache)} merchants cached.")
-    else:
-        print(f"{len(cache)} merchants cached.")
-
-    while to_be_cached:
-        # limit to 1000 to avoid overwhelming the LLM (and hitting token limits)
-        uncached_names = sorted(to_be_cached)[:1000]
-        representative: dict[str, dict] = {}
-        for g in groups:
-            if g["name"] in uncached_names and g["name"] not in representative:
-                representative[g["name"]] = g
-
-        to_classify = [{"index": i, **representative[name]} for i, name in enumerate(uncached_names)]
-        prompt = f"""You are a personal finance assistant. Categorize each merchant into a hierarchical category path.
-
-Merchants (index | month | merchant | total amount (count) | existing category):
-{build_prompt(to_classify)}
-
-Rules for the path array:
+_CATEGORIZE_RULES = """Rules for the path array:
 - Use 2 levels for clear-cut merchants (e.g. ["Utilities", "Internet"]).
 - Use 3 levels where meaningful specificity exists (e.g. ["Food & Drink", "Restaurants", "Fast Food"]).
 - Use 4 levels only when genuinely distinct (e.g. ["Shopping", "Clothing", "Kids", "Shoes"]).
 - Do not invent a deeper level just to fill space."""
-        result = llm_structured(prompt, _CATEGORIZE_SCHEMA, "categorize_merchants")
-        for r in result["results"]:
-            name = uncached_names[r["index"]]
-            cache[name] = {"path": r["path"]}
 
-        save_cache(cache)
-        print(f"Classified {len(uncached_names)} new merchants.")
-        to_be_cached -= set(uncached_names)
+
+def categorize_with_llm(groups: list[dict]) -> list[dict]:
+    cache = _load_cache()
+    to_be_cached = {g["name"] for g in groups if g["name"] not in cache}
+
+    if to_be_cached:
+        print(f"Sending {len(to_be_cached)} merchant(s) to LLM for categorization... ({len(cache)} cached)")
+    else:
+        print(f"{len(cache)} merchants cached.")
+
+    if to_be_cached:
+        # Build one representative entry per uncached merchant (preserving first occurrence)
+        seen: set[str] = set()
+        merchants: list[dict] = []
+        for g in groups:
+            if g["name"] in to_be_cached and g["name"] not in seen:
+                merchants.append(g)
+                seen.add(g["name"])
+
+        # Send up to _BATCH_SIZE merchants per LLM call
+        for start in range(0, len(merchants), _BATCH_SIZE):
+            chunk = merchants[start : start + _BATCH_SIZE]
+            lines = "\n".join(
+                f"{i}: {g['name']} | ${g['amount']:.2f} ({g['count']}x) | existing: {g['category']}"
+                for i, g in enumerate(chunk)
+            )
+            prompt = (
+                "You are a personal finance assistant. "
+                "Categorize each merchant below into a hierarchical category path.\n\n"
+                + lines + "\n\n"
+                + _CATEGORIZE_RULES
+                + '\n\nReturn a "categories" object mapping each index (as a string) to its path array.'
+            )
+            result = llm_structured(prompt, _CATEGORIZE_BATCH_SCHEMA, "categorize_merchants")
+            for idx_str, path in result.get("categories", {}).items():
+                if idx_str.isdigit() and int(idx_str) < len(chunk):
+                    cache[chunk[int(idx_str)]["name"]] = {"path": path}
+
+        # Fill any index the model skipped
+        for g in merchants:
+            if g["name"] not in cache:
+                cache[g["name"]] = {"path": ["Uncategorized"]}
+
+        _save_cache(cache)
+        print(f"Classified {len(to_be_cached)} new merchants.")
 
     merchant_names = {g["name"] for g in groups}
     _collapse_single_child_categories(cache, merchant_names)
@@ -167,7 +157,7 @@ def _collapse_single_child_categories(cache: dict, merchant_names: set[str]) -> 
             changed += 1
 
     if changed:
-        save_cache(cache)
+        _save_cache(cache)
         print(f"Collapsed {changed} merchant(s) with single-child category levels.")
 
 
@@ -215,7 +205,8 @@ All {len(paths_list)} indices must be present in the mapping."""
             entry["path"] = new_path
             changed += 1
 
-    save_cache(cache)
+    if changed:
+        _save_cache(cache)
     print(f"Consolidated {changed} merchant(s) to the new taxonomy.")
 
 # ── Transaction pipeline ───────────────────────────────────────────────────────

@@ -475,6 +475,7 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "anthropic" },
+    { name = "cryptography" },
     { name = "flask" },
     { name = "google-auth-oauthlib" },
     { name = "gspread" },
@@ -485,6 +486,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "anthropic" },
+    { name = "cryptography" },
     { name = "flask" },
     { name = "google-auth-oauthlib" },
     { name = "gspread" },

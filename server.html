@@ -275,24 +275,6 @@
     .terminal .err  { color: #f87171; }
     .terminal .done { color: #4ade80; font-weight: 700; }
 
-    /* ── Spreadsheet link ── */
-    .sheet-link {
-      display: none;
-      align-items: center;
-      gap: .75rem;
-      padding: .9rem 1.1rem;
-      background: #f0fdf4;
-      border: 1.5px solid #86efac;
-      border-radius: 10px;
-      color: #15803d;
-      text-decoration: none;
-      font-weight: 600;
-      font-size: .9rem;
-      transition: background .15s;
-    }
-    .sheet-link:hover { background: #dcfce7; }
-    .sheet-link.visible { display: flex; }
-
     /* ── Section label ── */
     .section-label {
       font-size: .83rem;
@@ -519,7 +501,18 @@ async function submitMonarchStep() {
   await post("/api/monarch/mode", { mode: "login" });
   const form = document.getElementById("mm-form");
   if (!form || form.style.display === "none") {
-    goNext();
+    // Saved session exists — validate it before proceeding
+    setBtn("mm-btn", true, "Verifying…");
+    const res = await post("/api/monarch/validate", {});
+    if (res.status === "ok") {
+      goNext();
+    } else {
+      // Session expired — clear saved state and drop back to the login form
+      status.monarch_session = false;
+      status.monarch_email = "";
+      renderMonarch();
+      show("mm-alert", "Session expired — please log in again.", "warn");
+    }
   } else {
     submitMonarch();
   }
@@ -663,51 +656,83 @@ function startGoogleAuth(pillId, btnId, onDone) {
       if (pill) { pill.style.cssText = "display:flex; background:#fef2f2; border:1px solid #fecaca; color:#b91c1c"; pill.textContent = res.message; }
       throw new Error(res.message);
     }
-    if (pill) { pill.className = "auth-pill waiting"; pill.innerHTML = `<span class="spin dark"></span> A browser tab opened — authorize there, then return here.`; }
+
+    const isRedirect = res.status === "redirect";
+    let popup = null;
+
+    if (isRedirect) {
+      popup = window.open(res.url, "google_auth", "width=600,height=700,top=100,left=100");
+      if (pill) { pill.className = "auth-pill waiting"; pill.innerHTML = `<span class="spin dark"></span> Complete authorization in the popup, then return here.`; }
+    } else {
+      if (pill) { pill.className = "auth-pill waiting"; pill.innerHTML = `<span class="spin dark"></span> A browser tab opened — authorize there, then return here.`; }
+    }
     if (btn) btn.disabled = true;
 
     return new Promise((resolve, reject) => {
       if (googlePollTimer) clearInterval(googlePollTimer);
-      googlePollTimer = setInterval(async () => {
-        const s = await api("/api/google/auth/status");
-        if (s.done) {
-          clearInterval(googlePollTimer);
-          googleAuthDone = true;
-          status.google_token = true;
-          if (pill) { pill.className = "auth-pill done"; pill.textContent = "✓ Google Sheets connected"; }
-          if (btn) { btn.innerHTML = "✓ Connected"; btn.className = "btn btn-success"; btn.disabled = true; }
-          if (onDone) onDone();
-          resolve();
-        } else if (s.error) {
-          clearInterval(googlePollTimer);
-          if (pill) { pill.style.cssText = "display:flex; background:#fef2f2; border:1px solid #fecaca; color:#b91c1c"; pill.textContent = s.error; }
-          if (btn) btn.disabled = false;
-          reject(new Error(s.error));
-        }
-      }, 1500);
+
+      function _onAuthDone() {
+        clearInterval(googlePollTimer);
+        googleAuthDone = true;
+        status.google_token = true;
+        if (pill) { pill.className = "auth-pill done"; pill.textContent = "✓ Google Sheets connected"; }
+        if (btn) { btn.innerHTML = "✓ Connected"; btn.className = "btn btn-success"; btn.disabled = true; }
+        if (onDone) onDone();
+        resolve();
+      }
+
+      if (isRedirect) {
+        // Listen for postMessage from the popup callback page
+        window.addEventListener("message", e => {
+          if (e.origin === location.origin && e.data === "google_auth_done") {
+            clearInterval(googlePollTimer);
+            // Small delay so the cookie is committed before we poll
+            setTimeout(() => _onAuthDone(), 300);
+          }
+        }, { once: true });
+
+        // Fallback: poll /api/status in case postMessage is blocked
+        googlePollTimer = setInterval(async () => {
+          const s = await api("/api/status");
+          if (s.google_token) {
+            if (popup && !popup.closed) popup.close();
+            _onAuthDone();
+          } else if (popup && popup.closed) {
+            clearInterval(googlePollTimer);
+            if (pill) { pill.style.cssText = "display:flex; background:#fef2f2; border:1px solid #fecaca; color:#b91c1c"; pill.textContent = "Authorization cancelled. Try again."; }
+            if (btn) btn.disabled = false;
+            reject(new Error("Authorization cancelled."));
+          }
+        }, 1500);
+      } else {
+        // Local dev (InstalledAppFlow): poll /api/google/auth/status
+        googlePollTimer = setInterval(async () => {
+          const s = await api("/api/google/auth/status");
+          if (s.done) {
+            _onAuthDone();
+          } else if (s.error) {
+            clearInterval(googlePollTimer);
+            if (pill) { pill.style.cssText = "display:flex; background:#fef2f2; border:1px solid #fecaca; color:#b91c1c"; pill.textContent = s.error; }
+            if (btn) btn.disabled = false;
+            reject(new Error(s.error));
+          }
+        }, 1500);
+      }
     });
   });
 }
 
 // ── Step 3: Run ───────────────────────────────────────────────────────────────
 function renderRun() {
-  const { google_token, google_creds, spreadsheet_id } = status;
+  const { google_token, google_configured } = status;
   googleAuthDone = google_token;
-  const sheetUrl = spreadsheet_id
-    ? `https://docs.google.com/spreadsheets/d/${spreadsheet_id}`
-    : "";
 
   document.getElementById("content").innerHTML = `
     <div class="card">
-      <a class="sheet-link ${sheetUrl ? "visible" : ""}" id="sheet-link"
-         href="${sheetUrl}" target="_blank" style="margin-bottom:1.25rem">
-        📊 Open Google Spreadsheet →
-      </a>
-
-      ${!google_creds ? `
+      ${!google_configured ? `
         <div class="alert error" style="display:block; margin-bottom:1rem">
-          <strong>Server not configured:</strong> credentials.json is missing.
-          Add a Google OAuth credentials file to the server before running.
+          <strong>Server not configured:</strong> Google OAuth credentials are missing.
+          Set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET, or add credentials.json to the server.
         </div>
       ` : !google_token ? `
         <div style="margin-bottom:1.5rem">
@@ -720,16 +745,17 @@ function renderRun() {
         </div>
       ` : ""}
 
-      <div id="run-area" style="display:${google_token && google_creds ? "" : "none"}">
+      <div id="run-area" style="display:${google_token && google_configured ? "" : "none"}">
         <div class="terminal" id="terminal"></div>
         <div class="nav" id="post-run-nav" style="display:none; margin-top:1rem">
           <button class="btn btn-secondary" onclick="goBack()">← Back</button>
-          <button class="btn btn-primary" onclick="runScript()">▶ Run Again</button>
+          <a id="sheet-btn" class="btn btn-primary" href="#" target="_blank"
+             style="display:none; text-decoration:none">📊 Open Google Spreadsheet</a>
         </div>
       </div>
     </div>`;
 
-  if (google_token && google_creds) {
+  if (google_token && google_configured) {
     runScript();
   }
 }
@@ -751,7 +777,18 @@ function runScript() {
     const data = JSON.parse(e.data);
     const p = document.createElement("p");
 
-    if (data.type === "line") {
+    if (data.type === "update_last") {
+      const last = term.lastElementChild;
+      if (last && last.dataset.updateable) {
+        last.textContent = data.text;
+      } else {
+        p.textContent = data.text;
+        p.dataset.updateable = "1";
+        term.appendChild(p);
+      }
+      term.scrollTop = term.scrollHeight;
+      return;
+    } else if (data.type === "line") {
       p.textContent = data.text;
     } else if (data.type === "done") {
       runEventSource.close(); runEventSource = null;
@@ -759,8 +796,8 @@ function runScript() {
       p.textContent = "✓ Done!";
       term.appendChild(p);
       term.scrollTop = term.scrollHeight;
-      const link = document.getElementById("sheet-link");
-      if (link) { link.href = data.url; link.classList.add("visible"); }
+      const btn = document.getElementById("sheet-btn");
+      if (btn) { btn.href = data.url; btn.style.display = ""; }
       document.getElementById("post-run-nav").style.display = "flex";
       return;
     } else if (data.type === "error") {

@@ -86,12 +86,12 @@ The first time the script connects to Google Sheets, a browser window will open 
 ### Option A — Web UI (recommended)
 
 ```bash
-uv run server.py
+uv run finance-server
 ```
 
 Open [http://localhost:5000](http://localhost:5000) in your browser. The setup wizard has two steps:
 
-1. **Monarch Money** — sign in, or upload an offline CSV export instead
+1. **Monarch Money** — sign in (session is validated before proceeding), or upload a CSV export instead
 2. **Spreadsheet** — enter an existing Google Sheet ID or create a new one
 
 Clicking **Run** starts the analysis immediately and streams output live.
@@ -104,23 +104,24 @@ uv run finance-run
 
 The script will:
 
-1. Fetch transactions from Monarch Money (or read from an offline CSV)
+1. Fetch all transactions from Monarch Money (or read from an offline CSV)
 2. Remove transfer pairs (e.g. credit card payments)
-3. Categorize each merchant using Claude AI (cached in `.merchant_cache.json`)
+3. Categorize merchants using Claude AI in batches of up to 1000 per call
 4. Consolidate categories if there are more than 100 unique paths or 15 root categories
-5. Detect spending anomalies month-over-month using Claude AI (cached in `.anomaly_cache.json`)
+5. Detect spending anomalies month-over-month using Claude AI
 6. Export per-year **Spending** and **Anomalies** tabs to your Google Sheet
 
 ---
 
 ## Cache files
 
+LLM results (merchant categories and monthly anomalies) are cached in hidden worksheet tabs (`_merchant_cache`, `_anomaly_cache`) inside the target Google Sheet, so they are per-user and require no server-side storage.
+
+For CLI use, two local files are created the first time you run:
+
 | File | Purpose |
 |---|---|
-| `manager/.merchant_cache.json` | Merchant → category path mappings (avoids redundant LLM calls) |
-| `manager/.anomaly_cache.json` | Month → anomaly notes (avoids redundant LLM calls) |
-| `manager/.monarch_transactions.json` | Cached transaction history from Monarch Money |
 | `manager/.monarch_session` | Saved Monarch Money login session |
 | `manager/.gsheets_token.json` | Saved Google OAuth token |
 
-Delete any of these files to force a fresh fetch on the next run.
+Delete either file to force re-authentication on the next run.

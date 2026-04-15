@@ -4,6 +4,7 @@ version = "0.1.0"
 requires-python = ">=3.11"
 dependencies = [
     "anthropic",
+    "cryptography",
     "flask",
     "google-auth-oauthlib",
     "gspread",
@@ -13,6 +14,7 @@ dependencies = [
 
 [project.scripts]
 finance-run = "manager.main:main_sync"
+finance-server = "server:run"
 
 [tool.hatch.build.targets.wheel]
 packages = ["manager"]
