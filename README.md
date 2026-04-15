@@ -14,7 +14,7 @@ Pulls transactions from Monarch Money, categorizes merchants with Claude AI, det
 ## 1. Install dependencies
 
 ```bash
-pip install anthropic python-dotenv monarchmoney gspread google-auth-oauthlib flask
+uv sync
 ```
 
 ---
@@ -86,7 +86,7 @@ The first time the script connects to Google Sheets, a browser window will open 
 ### Option A — Web UI (recommended)
 
 ```bash
-python server.py
+uv run server.py
 ```
 
 Open [http://localhost:5000](http://localhost:5000) in your browser. The setup wizard walks you through each configuration step (Monarch login, Anthropic key, Google OAuth, Spreadsheet ID) and then streams the run output live.
@@ -94,12 +94,12 @@ Open [http://localhost:5000](http://localhost:5000) in your browser. The setup w
 ### Option B — Command line
 
 ```bash
-python main.py
+uv run main.py
 ```
 
 The script will:
 
-1. Fetch the last 12 months of transactions from Monarch Money
+1. Fetch every transactions from Monarch Money
 2. Remove transfer pairs (e.g. credit card payments)
 3. Categorize each merchant using Claude AI (cached in `.merchant_cache.json`)
 4. Consolidate categories if there are more than 100 unique paths or 15 root categories
