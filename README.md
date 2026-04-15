@@ -89,7 +89,12 @@ The first time the script connects to Google Sheets, a browser window will open 
 uv run server.py
 ```
 
-Open [http://localhost:5000](http://localhost:5000) in your browser. The setup wizard walks you through each configuration step (Monarch login, Anthropic key, Google OAuth, Spreadsheet ID) and then streams the run output live.
+Open [http://localhost:5000](http://localhost:5000) in your browser. The setup wizard has two steps:
+
+1. **Monarch Money** — sign in, or upload an offline CSV export instead
+2. **Spreadsheet** — enter an existing Google Sheet ID or create a new one
+
+Clicking **Run** starts the analysis immediately and streams output live.
 
 ### Option B — Command line
 
@@ -99,13 +104,12 @@ uv run finance-run
 
 The script will:
 
-1. Fetch every transactions from Monarch Money
+1. Fetch transactions from Monarch Money (or read from an offline CSV)
 2. Remove transfer pairs (e.g. credit card payments)
 3. Categorize each merchant using Claude AI (cached in `.merchant_cache.json`)
 4. Consolidate categories if there are more than 100 unique paths or 15 root categories
 5. Detect spending anomalies month-over-month using Claude AI (cached in `.anomaly_cache.json`)
-6. Print a spending summary to the terminal
-7. Export per-year **Spending** and **Anomalies** tabs to your Google Sheet
+6. Export per-year **Spending** and **Anomalies** tabs to your Google Sheet
 
 ---
 

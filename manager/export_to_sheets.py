@@ -267,12 +267,10 @@ def export(categorized: list[dict], anomalies: dict) -> None:
     gc = gspread.authorize(creds)
     sh = gc.open_by_key(spreadsheet_id)
 
-    expected = {f"Spending {y}" for y in years} | {f"Anomalies {y}" for y in years}
+    def year_has_anomalies(year: str) -> bool:
+        return any(anomalies.get(m) for m in anomalies if m.startswith(year))
 
-    for ws in sh.worksheets():
-        if ws.title not in expected:
-            print(f"Removing old tab: {ws.title}")
-            sh.del_worksheet(ws)
+    expected = {f"Spending {y}" for y in years} | {f"Anomalies {y}" for y in years if year_has_anomalies(y)}
 
     def get_or_create(title: str) -> gspread.Worksheet:
         try:
@@ -280,6 +278,7 @@ def export(categorized: list[dict], anomalies: dict) -> None:
         except gspread.WorksheetNotFound:
             return sh.add_worksheet(title=title, rows=500, cols=30)
 
+    # Write expected tabs first so there is always at least one tab before any deletions
     for year in years:
         year_groups = [g for g in categorized if g["month"].startswith(year)]
         year_months = sorted({g["month"] for g in year_groups})
@@ -287,11 +286,18 @@ def export(categorized: list[dict], anomalies: dict) -> None:
         print(f"Writing Spending {year}...")
         write_spending_sheet(get_or_create(f"Spending {year}"), year_groups, anomalies)
 
-        print(f"Writing Anomalies {year}...")
-        write_anomalies_sheet(get_or_create(f"Anomalies {year}"), anomalies, year_months)
+        if year_has_anomalies(year):
+            print(f"Writing Anomalies {year}...")
+            write_anomalies_sheet(get_or_create(f"Anomalies {year}"), anomalies, year_months)
+
+    # Now safe to remove stale tabs — expected tabs already exist
+    for ws in sh.worksheets():
+        if ws.title not in expected:
+            print(f"Removing old tab: {ws.title}")
+            sh.del_worksheet(ws)
 
     # Reorder tabs chronologically: Spending {year}, Anomalies {year} for each year
-    desired_order = [title for year in years for title in (f"Spending {year}", f"Anomalies {year}")]
+    desired_order = [title for year in years for title in ([f"Spending {year}", f"Anomalies {year}"] if year_has_anomalies(year) else [f"Spending {year}"])]
     worksheets_by_title = {ws.title: ws for ws in sh.worksheets()}
     sh.reorder_worksheets([worksheets_by_title[t] for t in desired_order if t in worksheets_by_title])
 

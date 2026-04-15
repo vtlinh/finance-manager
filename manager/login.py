@@ -53,7 +53,10 @@ class Monarch:
 
 
 class Google:
-    SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
+    SCOPES = [
+        "https://www.googleapis.com/auth/spreadsheets",
+        "https://www.googleapis.com/auth/drive.file",
+    ]
     CREDS_FILE = str(_DIR / "credentials.json")
     TOKEN_FILE = str(_DIR / ".gsheets_token.json")
 

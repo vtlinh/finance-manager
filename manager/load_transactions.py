@@ -125,11 +125,17 @@ async def _fetch_since(mm, last_fetched: date, store: dict[str, dict], meta: dic
 async def get_transactions() -> list[dict]:
     """Return the full list of transactions.
 
-    On first run, fetches the full history by paginating backward.
-    On subsequent runs, fetches only new transactions since the last fetch.
-    Falls back to load_from_csv() if the Monarch API is unreachable.
-    Raises if neither source is available.
+    If USE_CSV=1 is set in the environment, skips Monarch and reads the CSV
+    directly. Otherwise fetches from Monarch (with CSV as fallback on failure).
     """
+    if os.environ.get("USE_CSV") == "1":
+        print("CSV mode — skipping Monarch.")
+        if not TRANSACTIONS_FILE.exists():
+            raise FileNotFoundError(
+                f"No CSV found at {TRANSACTIONS_FILE}. Upload a transactions file first."
+            )
+        return load_from_csv()
+
     store, meta = _load_store()
 
     try:

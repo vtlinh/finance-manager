@@ -54,7 +54,6 @@
       flex: 1;
       position: relative;
     }
-    /* connector line */
     .prog-item:not(:last-child)::after {
       content: "";
       position: absolute;
@@ -66,11 +65,9 @@
       z-index: 0;
     }
     .prog-item.done:not(:last-child)::after { background: var(--success); }
-    .prog-item.active:not(:last-child)::after { background: var(--border); }
 
     .prog-circle {
-      width: 28px;
-      height: 28px;
+      width: 28px; height: 28px;
       border-radius: 50%;
       display: flex;
       align-items: center;
@@ -83,8 +80,8 @@
       z-index: 1;
       flex-shrink: 0;
     }
-    .prog-item.active .prog-circle  { background: var(--primary); color: #fff; }
-    .prog-item.done   .prog-circle  { background: var(--success); color: #fff; }
+    .prog-item.active .prog-circle { background: var(--primary); color: #fff; }
+    .prog-item.done   .prog-circle { background: var(--success); color: #fff; }
 
     .prog-label {
       font-size: .7rem;
@@ -115,13 +112,13 @@
       font-size: .83rem;
       color: #1e40af;
       line-height: 1.6;
-      margin-bottom: 1.5rem;
+      margin-bottom: 1.25rem;
     }
     .info strong { display: block; margin-bottom: .4rem; font-size: .87rem; }
-    .info ol     { padding-left: 1.2rem; }
-    .info li     { margin-bottom: .2rem; }
-    .info a      { color: var(--primary); }
-    .info code   {
+    .info ol  { padding-left: 1.2rem; }
+    .info li  { margin-bottom: .2rem; }
+    .info a   { color: var(--primary); }
+    .info code {
       background: #dbeafe;
       padding: .1rem .35rem;
       border-radius: 4px;
@@ -151,6 +148,7 @@
       border-color: var(--primary);
       box-shadow: 0 0 0 3px rgba(37,99,235,.12);
     }
+    input[readonly] { background: #f9fafb; color: var(--muted); cursor: default; }
 
     /* ── Buttons ── */
     .btn {
@@ -169,10 +167,33 @@
     .btn-primary   { background: var(--primary); color: #fff; }
     .btn-primary:hover:not(:disabled) { background: var(--primary-h); }
     .btn-secondary { background: #fff; color: #374151; border-color: var(--border); }
-    .btn-secondary:hover { background: #f9fafb; }
+    .btn-secondary:hover:not(:disabled) { background: #f9fafb; }
     .btn-success   { background: var(--success); color: #fff; }
     .btn-success:hover:not(:disabled) { background: #15803d; }
     .btn:disabled  { opacity: .45; cursor: not-allowed; }
+
+    /* ── Segmented toggle ── */
+    .seg-group {
+      display: flex;
+      border: 1.5px solid var(--border);
+      border-radius: 8px;
+      overflow: hidden;
+      margin-bottom: 1.25rem;
+    }
+    .seg-btn {
+      flex: 1;
+      padding: .55rem .75rem;
+      font-size: .875rem;
+      font-weight: 500;
+      cursor: pointer;
+      border: none;
+      background: #fff;
+      color: var(--muted);
+      transition: background .15s, color .15s;
+    }
+    .seg-btn + .seg-btn { border-left: 1.5px solid var(--border); }
+    .seg-btn.active { background: var(--primary); color: #fff; font-weight: 600; }
+    .seg-btn:hover:not(.active) { background: #f9fafb; }
 
     /* ── Nav row ── */
     .nav {
@@ -206,17 +227,14 @@
       animation: spin .65s linear infinite;
       flex-shrink: 0;
     }
-    .spin.dark {
-      border-color: rgba(0,0,0,.15);
-      border-top-color: var(--warn-txt);
-    }
+    .spin.dark { border-color: rgba(0,0,0,.15); border-top-color: var(--warn-txt); }
     @keyframes spin { to { transform: rotate(360deg); } }
 
     /* ── File upload ── */
     .upload-zone {
       border: 2px dashed var(--border);
       border-radius: 9px;
-      padding: 1.6rem 1rem;
+      padding: 1.4rem 1rem;
       text-align: center;
       cursor: pointer;
       transition: border-color .15s, background .15s;
@@ -224,11 +242,7 @@
       color: var(--muted);
     }
     .upload-zone:hover { border-color: var(--primary); }
-    .upload-zone.has-file {
-      border-color: var(--success);
-      background: #f0fdf4;
-      color: var(--success);
-    }
+    .upload-zone.has-file { border-color: var(--success); background: #f0fdf4; color: var(--success); }
     .upload-zone input { display: none; }
 
     /* ── Google auth status pill ── */
@@ -243,9 +257,6 @@
     }
     .auth-pill.waiting { display: flex; background: var(--warn-bg); border: 1px solid var(--warn-br); color: var(--warn-txt); }
     .auth-pill.done    { display: flex; background: #f0fdf4; border: 1px solid #bbf7d0; color: #15803d; }
-
-    /* ── MFA section ── */
-    #mfa-block { display: none; margin-top: .75rem; }
 
     /* ── Terminal ── */
     .terminal {
@@ -281,6 +292,14 @@
     }
     .sheet-link:hover { background: #dcfce7; }
     .sheet-link.visible { display: flex; }
+
+    /* ── Section label ── */
+    .section-label {
+      font-size: .83rem;
+      font-weight: 600;
+      margin-bottom: .5rem;
+      display: block;
+    }
   </style>
 </head>
 <body>
@@ -299,8 +318,6 @@
 // ── Config ────────────────────────────────────────────────────────────────────
 const STEPS = [
   { label: "Monarch" },
-  { label: "Anthropic" },
-  { label: "Google" },
   { label: "Spreadsheet" },
   { label: "Run" },
 ];
@@ -309,10 +326,15 @@ let step = 0;
 let status = {};
 let googleAuthDone = false;
 let googlePollTimer = null;
+let monarchMode = "login";          // "login" | "csv"
+let runEventSource = null;
+let monarchModeUserSet = false;     // true once the user has manually picked a tab
+let sheetMode   = "existing"; // "existing" | "create"
 
 // ── Bootstrap ─────────────────────────────────────────────────────────────────
 async function init() {
   status = await api("/api/status");
+  googleAuthDone = status.google_token;
   renderProgress();
   renderStep();
 }
@@ -331,17 +353,21 @@ function renderProgress() {
 
 // ── Routing ───────────────────────────────────────────────────────────────────
 function renderStep() {
-  [renderMonarch, renderAnthropic, renderGoogle, renderSpreadsheet, renderRun][step]();
+  [renderMonarch, renderSpreadsheet, renderRun][step]();
 }
 function goNext() { step++; renderProgress(); renderStep(); }
-function goBack() { step--; renderProgress(); renderStep(); }
+function goBack() {
+  if (runEventSource) { runEventSource.close(); runEventSource = null; }
+  step--;
+  renderProgress();
+  renderStep();
+}
 
 // ── Utilities ─────────────────────────────────────────────────────────────────
 async function api(url, opts) {
   const r = await fetch(url, opts);
   return r.json();
 }
-
 function show(id, text, type) {
   const el = document.getElementById(id);
   if (!el) return;
@@ -364,41 +390,74 @@ function setBtn(id, loading, html) {
   const el = document.getElementById(id);
   if (!el) return;
   el.disabled = loading;
-  el.innerHTML = loading
-    ? `<span class="spin"></span>${html || "Working…"}`
-    : html;
+  el.innerHTML = loading ? `<span class="spin"></span>${html || "Working…"}` : html;
 }
 
 // ── Step 1: Monarch Money ─────────────────────────────────────────────────────
 function renderMonarch() {
+  const { monarch_session, monarch_email, has_csv } = status;
+  // Auto-select csv tab on first render only (user can always switch back)
+  if (!monarchModeUserSet && has_csv && !monarch_session) monarchMode = "csv";
+
   document.getElementById("content").innerHTML = `
     <div class="card">
       <div class="card-title">Monarch Money</div>
-      <div class="card-desc">Enter your Monarch Money login credentials to pull your transactions.</div>
+      <div class="card-desc">Sign in to pull your transactions live, or upload a CSV export.</div>
 
-      <div class="info">
-        <strong>ℹ️ Where to find these</strong>
-        Use the same email and password you use to log in at
-        <a href="https://app.monarchmoney.com" target="_blank">app.monarchmoney.com</a>.
-        If two-factor authentication is enabled on your account, you'll be asked
-        for your authenticator code after clicking <em>Verify &amp; Next</em>.
+      <div class="seg-group">
+        <button class="seg-btn ${monarchMode === "login" ? "active" : ""}"
+                onclick="setMonarchMode('login')">Login</button>
+        <button class="seg-btn ${monarchMode === "csv" ? "active" : ""}"
+                onclick="setMonarchMode('csv')">Use CSV file</button>
       </div>
 
-      <div class="field">
-        <label>Email</label>
-        <input type="email" id="mm-email" placeholder="you@example.com"
-               value="${status.monarch_email_value || ""}">
-      </div>
-      <div class="field">
-        <label>Password</label>
-        <input type="password" id="mm-password" placeholder="Your Monarch password">
+      <!-- Login section -->
+      <div style="display:${monarchMode === "login" ? "" : "none"}">
+        ${monarch_session ? `
+          <div class="alert success" style="display:block">
+            Saved session found${monarch_email ? ` · ${monarch_email}` : ""}.
+            <a href="#" onclick="showMonarchForm(event)"
+               style="margin-left:.5rem; font-weight:600; color:inherit">Re-enter credentials</a>
+          </div>
+        ` : ""}
+        <div id="mm-form" style="display:${monarch_session ? "none" : ""}">
+          <div class="field">
+            <label>Email</label>
+            <input type="email" id="mm-email" placeholder="you@example.com"
+                   value="${monarch_email || ""}">
+          </div>
+          <div class="field">
+            <label>Password</label>
+            <input type="password" id="mm-password" placeholder="Your Monarch password">
+          </div>
+          <div class="field">
+            <label>Two-Factor Code
+              <span style="font-weight:400; color:var(--muted); margin-left:.3rem">(if enabled)</span>
+            </label>
+            <input type="text" id="mm-mfa" placeholder="123456" maxlength="8"
+                   inputmode="numeric" autocomplete="one-time-code">
+          </div>
+        </div>
       </div>
 
-      <div id="mfa-block">
-        <div class="field">
-          <label>Two-Factor Code</label>
-          <input type="text" id="mm-mfa" placeholder="123456" maxlength="8"
-                 inputmode="numeric" autocomplete="one-time-code">
+      <!-- CSV section -->
+      <div style="display:${monarchMode === "csv" ? "" : "none"}">
+        <div class="info">
+          <strong>How to export from Monarch Money</strong>
+          <ol>
+            <li>Go to <a href="https://app.monarchmoney.com/transactions" target="_blank">app.monarchmoney.com/transactions</a></li>
+            <li>Click the download icon (⬇) in the top-right corner</li>
+            <li>Select <strong>Export as CSV</strong></li>
+            <li>Upload the downloaded file below</li>
+          </ol>
+          Required columns: <code>Date</code>, <code>Merchant</code>, <code>Amount</code>, <code>Category</code>
+        </div>
+        <div class="upload-zone ${has_csv ? "has-file" : ""}" id="csv-zone"
+             onclick="document.getElementById('csv-input').click()">
+          <input type="file" id="csv-input" accept=".csv" onchange="uploadCsv(this)">
+          <span id="csv-label">
+            ${has_csv ? "✓ CSV already uploaded — click to replace" : "📂 Click to upload transactions.csv"}
+          </span>
         </div>
       </div>
 
@@ -406,323 +465,306 @@ function renderMonarch() {
 
       <div class="nav">
         <span></span>
-        <button class="btn btn-primary" id="mm-btn" onclick="submitMonarch()">Verify &amp; Next →</button>
+        <button class="btn btn-primary" id="mm-btn" onclick="submitMonarchStep()">
+          ${monarchMode === "login" && !monarch_session ? "Verify &amp; Next →" : "Next →"}
+        </button>
       </div>
     </div>`;
 
-  if (status.monarch_session) {
-    show("mm-alert",
-      "An active session is already saved — click Next to continue, or re-enter credentials to refresh it.",
-      "success");
-    document.getElementById("mm-btn").innerHTML = "Next →";
-    document.getElementById("mm-btn").onclick = goNext;
-  }
-
-  document.getElementById("mm-password").addEventListener("keydown", e => {
+  document.getElementById("mm-password")?.addEventListener("keydown", e => {
     if (e.key === "Enter") submitMonarch();
   });
+  document.getElementById("mm-mfa")?.addEventListener("keydown", e => {
+    if (e.key === "Enter") submitMFA();
+  });
+}
+
+function setMonarchMode(mode) {
+  monarchMode = mode;
+  monarchModeUserSet = true;
+  renderMonarch();
+}
+
+function showMonarchForm(e) {
+  e.preventDefault();
+  document.getElementById("mm-form").style.display = "";
+  const btn = document.getElementById("mm-btn");
+  btn.innerHTML = "Verify &amp; Next →";
+}
+
+async function uploadCsv(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const fd = new FormData();
+  fd.append("file", file);
+  const res = await fetch("/api/transactions/upload", { method: "POST", body: fd }).then(r => r.json());
+  if (res.status === "ok") {
+    status.has_csv = true;
+    document.getElementById("csv-label").textContent = `✓ ${file.name} uploaded`;
+    document.getElementById("csv-zone").classList.add("has-file");
+    hide("mm-alert");
+  } else {
+    show("mm-alert", res.message || "Upload failed.", "error");
+  }
+}
+
+async function submitMonarchStep() {
+  if (monarchMode === "csv") {
+    if (!status.has_csv) { show("mm-alert", "Please upload a CSV file first.", "error"); return; }
+    await post("/api/monarch/mode", { mode: "csv" });
+    goNext();
+    return;
+  }
+  // Login mode
+  await post("/api/monarch/mode", { mode: "login" });
+  const form = document.getElementById("mm-form");
+  if (!form || form.style.display === "none") {
+    goNext();
+  } else {
+    submitMonarch();
+  }
 }
 
 async function submitMonarch() {
   const email    = document.getElementById("mm-email").value.trim();
   const password = document.getElementById("mm-password").value.trim();
+  const mfa      = document.getElementById("mm-mfa")?.value.trim();
   if (!email || !password) { show("mm-alert", "Please fill in both fields.", "error"); return; }
 
   setBtn("mm-btn", true, "Connecting…");
   hide("mm-alert");
 
   const res = await post("/api/monarch/login", { email, password });
-
   if (res.status === "ok") {
+    status.monarch_email = email;
     goNext();
   } else if (res.status === "mfa_required") {
-    document.getElementById("mfa-block").style.display = "block";
-    document.getElementById("mm-btn").onclick = submitMFA;
-    setBtn("mm-btn", false, "Submit Code →");
-    show("mm-alert", "Enter the code from your authenticator app.", "info");
-    document.getElementById("mm-mfa").focus();
+    if (mfa) {
+      // Code was pre-filled — submit it automatically
+      const mfaRes = await post("/api/monarch/mfa", { code: mfa });
+      if (mfaRes.status === "ok") {
+        status.monarch_email = email;
+        goNext();
+      } else {
+        setBtn("mm-btn", false, "Verify &amp; Next →");
+        document.getElementById("mm-mfa").value = "";
+        show("mm-alert", mfaRes.message || "Invalid two-factor code.", "error");
+        document.getElementById("mm-mfa").focus();
+      }
+    } else {
+      setBtn("mm-btn", false, "Verify &amp; Next →");
+      show("mm-alert", "Two-factor authentication required — enter your code above.", "info");
+      document.getElementById("mm-mfa").focus();
+    }
   } else {
     setBtn("mm-btn", false, "Verify &amp; Next →");
     show("mm-alert", res.message || "Login failed.", "error");
   }
 }
 
-async function submitMFA() {
-  const code = document.getElementById("mm-mfa").value.trim();
-  if (!code) { show("mm-alert", "Please enter your 2FA code.", "error"); return; }
-
-  setBtn("mm-btn", true, "Verifying…");
-  const res = await post("/api/monarch/mfa", { code });
-
-  if (res.status === "ok") {
-    goNext();
-  } else {
-    setBtn("mm-btn", false, "Submit Code →");
-    show("mm-alert", res.message || "Invalid code.", "error");
-  }
-}
-
-// ── Step 2: Anthropic API Key ─────────────────────────────────────────────────
-function renderAnthropic() {
-  document.getElementById("content").innerHTML = `
-    <div class="card">
-      <div class="card-title">Anthropic API Key</div>
-      <div class="card-desc">Used to automatically categorize your transactions with Claude AI.</div>
-
-      <div class="info">
-        <strong>ℹ️ How to get your API key</strong>
-        <ol>
-          <li>Go to <a href="https://console.anthropic.com" target="_blank">console.anthropic.com</a></li>
-          <li>Open <strong>API Keys</strong> in the left sidebar</li>
-          <li>Click <strong>Create Key</strong>, give it a name, and copy it</li>
-          <li>The key starts with <code>sk-ant-</code></li>
-        </ol>
-      </div>
-
-      <div class="field">
-        <label>API Key</label>
-        <input type="password" id="ant-key" placeholder="sk-ant-api03-…"
-               value="${status.anthropic_key_value || ""}">
-      </div>
-
-      <div class="alert" id="ant-alert"></div>
-
-      <div class="nav">
-        <button class="btn btn-secondary" onclick="goBack()">← Back</button>
-        <button class="btn btn-primary" onclick="submitAnthropic()">Next →</button>
-      </div>
-    </div>`;
-
-  document.getElementById("ant-key").addEventListener("keydown", e => {
-    if (e.key === "Enter") submitAnthropic();
-  });
-}
-
-async function submitAnthropic() {
-  const key = document.getElementById("ant-key").value.trim();
-  if (!key) { show("ant-alert", "Please enter your API key.", "error"); return; }
-  if (!key.startsWith("sk-ant-")) {
-    show("ant-alert", "That doesn't look like an Anthropic key — it should start with sk-ant-.", "error");
-    return;
-  }
-  await post("/api/save", { key: "ANTHROPIC_API_KEY", value: key });
-  goNext();
-}
-
-// ── Step 3: Google Sheets ─────────────────────────────────────────────────────
-function renderGoogle() {
-  const hasCreds = status.google_credentials;
-  const hasToken = status.google_token;
-  googleAuthDone = hasToken;
-
-  document.getElementById("content").innerHTML = `
-    <div class="card">
-      <div class="card-title">Google Sheets Access</div>
-      <div class="card-desc">Authorize the app to read and write your Google Sheet.</div>
-
-      <div class="info">
-        <strong>ℹ️ How to create OAuth credentials</strong>
-        <ol>
-          <li>Go to <a href="https://console.cloud.google.com" target="_blank">console.cloud.google.com</a></li>
-          <li>Create or select a project</li>
-          <li>Navigate to <strong>APIs &amp; Services → Library</strong> and enable the <strong>Google Sheets API</strong></li>
-          <li>Go to <strong>APIs &amp; Services → Credentials</strong></li>
-          <li>Click <strong>Create Credentials → OAuth 2.0 Client ID</strong></li>
-          <li>Choose <strong>Desktop app</strong> as the application type</li>
-          <li>Click <strong>Download JSON</strong> and upload the file below</li>
-        </ol>
-      </div>
-
-      <div class="field">
-        <label>credentials.json</label>
-        <div class="upload-zone ${hasCreds ? "has-file" : ""}"
-             id="upload-zone"
-             onclick="document.getElementById('creds-input').click()">
-          <input type="file" id="creds-input" accept=".json" onchange="uploadCreds(this)">
-          <span id="upload-label">
-            ${hasCreds ? "✓ credentials.json already uploaded — click to replace" : "📂 Click to upload credentials.json"}
-          </span>
-        </div>
-      </div>
-
-      <div id="auth-section" style="${hasCreds ? "" : "display:none"}">
-        <div class="field">
-          <label>Authorize Google Sheets</label>
-          <button class="btn ${hasToken ? "btn-success" : "btn-secondary"}"
-                  id="google-btn"
-                  onclick="startGoogleAuth()">
-            ${hasToken ? "✓ Connected" : "🔗 Connect Google Sheets"}
-          </button>
-          <div class="auth-pill ${hasToken ? "done" : ""}" id="auth-pill">
-            ${hasToken ? "✓ Google Sheets is connected" : ""}
-          </div>
-        </div>
-      </div>
-
-      <div class="alert" id="goog-alert"></div>
-
-      <div class="nav">
-        <button class="btn btn-secondary" onclick="goBack()">← Back</button>
-        <button class="btn btn-primary" id="goog-next"
-                onclick="proceedGoogle()"
-                ${hasToken ? "" : "disabled"}>Next →</button>
-      </div>
-    </div>`;
-}
-
-async function uploadCreds(input) {
-  const file = input.files[0];
-  if (!file) return;
-  const fd = new FormData();
-  fd.append("file", file);
-  const res = await fetch("/api/google/credentials", { method: "POST", body: fd }).then(r => r.json());
-  if (res.status === "ok") {
-    document.getElementById("upload-label").textContent = `✓ ${file.name} uploaded`;
-    document.getElementById("upload-zone").classList.add("has-file");
-    document.getElementById("auth-section").style.display = "";
-    status.google_credentials = true;
-  } else {
-    show("goog-alert", res.message || "Upload failed.", "error");
-  }
-}
-
-async function startGoogleAuth() {
-  const res = await post("/api/google/auth", {});
-  if (res.status !== "started") { show("goog-alert", "Failed to start OAuth flow.", "error"); return; }
-
-  const pill = document.getElementById("auth-pill");
-  pill.className = "auth-pill waiting";
-  pill.innerHTML = `<span class="spin dark"></span> A new tab opened — complete authorization there, then return here.`;
-
-  document.getElementById("google-btn").disabled = true;
-
-  if (googlePollTimer) clearInterval(googlePollTimer);
-  googlePollTimer = setInterval(async () => {
-    const s = await api("/api/google/auth/status");
-    if (s.done) {
-      clearInterval(googlePollTimer);
-      googleAuthDone = true;
-      status.google_token = true;
-      pill.className = "auth-pill done";
-      pill.textContent = "✓ Google Sheets is connected";
-      const btn = document.getElementById("google-btn");
-      btn.textContent = "✓ Connected";
-      btn.className = "btn btn-success";
-      btn.disabled = true;
-      document.getElementById("goog-next").disabled = false;
-    } else if (s.error) {
-      clearInterval(googlePollTimer);
-      show("goog-alert", s.error, "error");
-      document.getElementById("google-btn").disabled = false;
-    }
-  }, 1500);
-}
-
-function proceedGoogle() {
-  if (!googleAuthDone) { show("goog-alert", "Please complete Google authorization first.", "warn"); return; }
-  goNext();
-}
-
-// ── Step 4: Spreadsheet ID ────────────────────────────────────────────────────
+// ── Step 2: Spreadsheet ───────────────────────────────────────────────────────
 function renderSpreadsheet() {
+  const { spreadsheet_id, google_token } = status;
+
   document.getElementById("content").innerHTML = `
     <div class="card">
-      <div class="card-title">Google Spreadsheet ID</div>
-      <div class="card-desc">The ID of the Google Sheet where your finance summary will be exported.</div>
+      <div class="card-title">Google Spreadsheet</div>
+      <div class="card-desc">Choose the spreadsheet where your finance summary will be exported.</div>
 
-      <div class="info">
-        <strong>ℹ️ Where to find your Spreadsheet ID</strong>
-        Open your Google Sheet. The ID is the long string of characters in the URL:
-        <br><br>
-        <code>docs.google.com/spreadsheets/d/<strong style="color:#1e40af">YOUR_ID_HERE</strong>/edit</code>
-        <br><br>
-        Don't have a sheet yet? Create one at
-        <a href="https://sheets.new" target="_blank">sheets.new</a> — the ID will appear in its URL.
+      <div class="seg-group">
+        <button class="seg-btn ${sheetMode === "existing" ? "active" : ""}"
+                onclick="setSheetMode('existing')">Use existing sheet</button>
+        <button class="seg-btn ${sheetMode === "create" ? "active" : ""}"
+                onclick="setSheetMode('create')">Create new sheet</button>
       </div>
 
-      <div class="field">
-        <label>Spreadsheet ID</label>
-        <input type="text" id="sid" placeholder="1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgVE2upms"
-               value="${status.spreadsheet_id_value || ""}">
+      <!-- Existing sheet section -->
+      <div id="existing-section" style="display:${sheetMode === "existing" ? "" : "none"}">
+        <div class="info">
+          <strong>Where to find your Spreadsheet ID</strong>
+          The ID is the long string in the URL between <code>/d/</code> and <code>/edit</code>:
+          <code>docs.google.com/spreadsheets/d/<strong style="color:#1e40af">YOUR_ID_HERE</strong>/edit</code>
+        </div>
+        <div class="field">
+          <label>Spreadsheet ID</label>
+          <input type="text" id="sid-existing"
+                 placeholder="1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgVE2upms"
+                 value="${spreadsheet_id || ""}">
+        </div>
+      </div>
+
+      <!-- Create new sheet section -->
+      <div id="create-section" style="display:${sheetMode === "create" ? "" : "none"}">
+        <div class="info">
+          <strong>A new spreadsheet will be created for you</strong>
+          A "Finance Manager" spreadsheet will be added to your Google Drive.
+          ${!google_token
+            ? "You'll be asked to authorize Google Sheets access when you click Next."
+            : ""}
+        </div>
+        ${google_token
+          ? `<div class="alert success" style="display:block">✓ Google Sheets is connected — ready to create.</div>`
+          : ""}
+        <div class="auth-pill" id="auth-pill-sheet"></div>
       </div>
 
       <div class="alert" id="sid-alert"></div>
 
       <div class="nav">
         <button class="btn btn-secondary" onclick="goBack()">← Back</button>
-        <button class="btn btn-primary" onclick="submitSpreadsheet()">Next →</button>
+        <button class="btn btn-primary" id="sid-run-btn" onclick="submitSpreadsheet()">▶ Run</button>
       </div>
     </div>`;
 
-  document.getElementById("sid").addEventListener("keydown", e => {
+  document.getElementById("sid-existing")?.addEventListener("keydown", e => {
     if (e.key === "Enter") submitSpreadsheet();
   });
 }
 
-async function submitSpreadsheet() {
-  const sid = document.getElementById("sid").value.trim();
-  if (!sid) { show("sid-alert", "Please enter your Spreadsheet ID.", "error"); return; }
-  await post("/api/save", { key: "SPREADSHEET_ID", value: sid });
-  goNext();
+function setSheetMode(mode) {
+  sheetMode = mode;
+  renderSpreadsheet();
 }
 
-// ── Step 5: Run ───────────────────────────────────────────────────────────────
+async function submitSpreadsheet() {
+  if (sheetMode === "existing") {
+    const sid = document.getElementById("sid-existing")?.value.trim();
+    if (!sid) { show("sid-alert", "Please enter your Spreadsheet ID.", "error"); return; }
+    await post("/api/sheets/save", { spreadsheet_id: sid });
+    status.spreadsheet_id = sid;
+    goNext();
+    return;
+  }
+
+  // Create mode: authorize (if needed) → create sheet → run
+  setBtn("sid-run-btn", true, "Working…");
+  hide("sid-alert");
+  try {
+    if (!status.google_token) {
+      await startGoogleAuth("auth-pill-sheet", null, null);
+    }
+    const res = await post("/api/sheets/create", {});
+    if (res.status !== "ok") throw new Error(res.message || "Failed to create spreadsheet.");
+    status.spreadsheet_id = res.spreadsheet_id;
+    goNext();
+  } catch (err) {
+    setBtn("sid-run-btn", false, "▶ Run");
+    show("sid-alert", err.message, "error");
+  }
+}
+
+// ── Google auth (shared, returns Promise) ────────────────────────────────────
+function startGoogleAuth(pillId, btnId, onDone) {
+  const pill = document.getElementById(pillId);
+  const btn  = document.getElementById(btnId);
+
+  return post("/api/google/auth", {}).then(res => {
+    if (res.status === "error") {
+      if (pill) { pill.style.cssText = "display:flex; background:#fef2f2; border:1px solid #fecaca; color:#b91c1c"; pill.textContent = res.message; }
+      throw new Error(res.message);
+    }
+    if (pill) { pill.className = "auth-pill waiting"; pill.innerHTML = `<span class="spin dark"></span> A browser tab opened — authorize there, then return here.`; }
+    if (btn) btn.disabled = true;
+
+    return new Promise((resolve, reject) => {
+      if (googlePollTimer) clearInterval(googlePollTimer);
+      googlePollTimer = setInterval(async () => {
+        const s = await api("/api/google/auth/status");
+        if (s.done) {
+          clearInterval(googlePollTimer);
+          googleAuthDone = true;
+          status.google_token = true;
+          if (pill) { pill.className = "auth-pill done"; pill.textContent = "✓ Google Sheets connected"; }
+          if (btn) { btn.innerHTML = "✓ Connected"; btn.className = "btn btn-success"; btn.disabled = true; }
+          if (onDone) onDone();
+          resolve();
+        } else if (s.error) {
+          clearInterval(googlePollTimer);
+          if (pill) { pill.style.cssText = "display:flex; background:#fef2f2; border:1px solid #fecaca; color:#b91c1c"; pill.textContent = s.error; }
+          if (btn) btn.disabled = false;
+          reject(new Error(s.error));
+        }
+      }, 1500);
+    });
+  });
+}
+
+// ── Step 3: Run ───────────────────────────────────────────────────────────────
 function renderRun() {
+  const { google_token, google_creds, spreadsheet_id } = status;
+  googleAuthDone = google_token;
+  const sheetUrl = spreadsheet_id
+    ? `https://docs.google.com/spreadsheets/d/${spreadsheet_id}`
+    : "";
+
   document.getElementById("content").innerHTML = `
     <div class="card">
-      <div class="card-title">Run Finance Manager</div>
-      <div class="card-desc">
-        Everything is configured. Click <strong>Run</strong> to fetch transactions,
-        categorize them with Claude AI, and export the results to your Google Sheet.
-      </div>
+      <a class="sheet-link ${sheetUrl ? "visible" : ""}" id="sheet-link"
+         href="${sheetUrl}" target="_blank" style="margin-bottom:1.25rem">
+        📊 Open Google Spreadsheet →
+      </a>
 
-      <div id="pre-run" class="nav">
-        <button class="btn btn-secondary" onclick="goBack()">← Back</button>
-        <button class="btn btn-primary" id="run-btn" onclick="runScript()">▶ Run</button>
-      </div>
+      ${!google_creds ? `
+        <div class="alert error" style="display:block; margin-bottom:1rem">
+          <strong>Server not configured:</strong> credentials.json is missing.
+          Add a Google OAuth credentials file to the server before running.
+        </div>
+      ` : !google_token ? `
+        <div style="margin-bottom:1.5rem">
+          <span class="section-label">Connect Google Sheets</span>
+          <button class="btn btn-secondary" id="gauth-btn-run"
+                  onclick="startGoogleAuth('auth-pill-run','gauth-btn-run', onRunAuthDone)">
+            🔗 Connect Google Sheets
+          </button>
+          <div class="auth-pill" id="auth-pill-run"></div>
+        </div>
+      ` : ""}
 
-      <div id="run-area" style="display:none">
+      <div id="run-area" style="display:${google_token && google_creds ? "" : "none"}">
         <div class="terminal" id="terminal"></div>
-        <a class="sheet-link" id="sheet-link" target="_blank">
-          📊 Open Google Spreadsheet →
-        </a>
-        <div class="nav" id="post-run-nav" style="display:none; margin-top:1rem;">
+        <div class="nav" id="post-run-nav" style="display:none; margin-top:1rem">
           <button class="btn btn-secondary" onclick="goBack()">← Back</button>
           <button class="btn btn-primary" onclick="runScript()">▶ Run Again</button>
         </div>
       </div>
     </div>`;
+
+  if (google_token && google_creds) {
+    runScript();
+  }
+}
+
+function onRunAuthDone() {
+  document.getElementById("run-area").style.display = "";
+  runScript();
 }
 
 function runScript() {
-  document.getElementById("pre-run").style.display = "none";
-  document.getElementById("run-area").style.display = "";
-  document.getElementById("sheet-link").classList.remove("visible");
+  if (runEventSource) { runEventSource.close(); runEventSource = null; }
   document.getElementById("post-run-nav").style.display = "none";
   const term = document.getElementById("terminal");
   term.innerHTML = "";
 
-  const es = new EventSource("/api/run");
+  runEventSource = new EventSource("/api/run");
 
-  es.onmessage = e => {
+  runEventSource.onmessage = e => {
     const data = JSON.parse(e.data);
     const p = document.createElement("p");
 
     if (data.type === "line") {
       p.textContent = data.text;
     } else if (data.type === "done") {
-      es.close();
+      runEventSource.close(); runEventSource = null;
       p.className = "done";
       p.textContent = "✓ Done!";
       term.appendChild(p);
       term.scrollTop = term.scrollHeight;
       const link = document.getElementById("sheet-link");
-      link.href = data.url;
-      link.classList.add("visible");
+      if (link) { link.href = data.url; link.classList.add("visible"); }
       document.getElementById("post-run-nav").style.display = "flex";
       return;
     } else if (data.type === "error") {
-      es.close();
+      runEventSource.close(); runEventSource = null;
       p.className = "err";
       p.textContent = "✗ " + data.text;
       term.appendChild(p);
@@ -735,8 +777,8 @@ function runScript() {
     term.scrollTop = term.scrollHeight;
   };
 
-  es.onerror = () => {
-    es.close();
+  runEventSource.onerror = () => {
+    runEventSource.close(); runEventSource = null;
     const p = document.createElement("p");
     p.className = "err";
     p.textContent = "Connection lost.";

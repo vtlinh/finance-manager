@@ -23,8 +23,8 @@ async def main() -> None:
     categorized = categorize_with_llm(groups)
     anomalies = detect_monthly_anomalies(categorized)
 
-    print()
-    print_spreadsheet(categorized, anomalies)
+    # print()
+    # print_spreadsheet(categorized, anomalies)
     export(categorized, anomalies)
 
 
