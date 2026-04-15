@@ -8,6 +8,7 @@ dependencies = [
     "flask",
     "google-auth-oauthlib",
     "gspread",
+    "gunicorn; sys_platform != 'win32'",
     "monarchmoney",
     "python-dotenv",
 ]

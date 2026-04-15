@@ -26,6 +26,13 @@ _SECRET_KEY_FILE = BASE_DIR / ".flask_secret"
 
 
 def _get_secret_key() -> bytes:
+    # Cloud deployments: set FLASK_SECRET_KEY to a stable hex string so sessions
+    # survive restarts on ephemeral filesystems (e.g. Render free tier).
+    # Generate once with: python -c "import secrets; print(secrets.token_hex(32))"
+    key_hex = os.environ.get("FLASK_SECRET_KEY")
+    if key_hex:
+        return bytes.fromhex(key_hex)
+    # Local dev fallback: persist to file so sessions survive server restarts
     if _SECRET_KEY_FILE.exists():
         return _SECRET_KEY_FILE.read_bytes()
     key = os.urandom(32)
@@ -507,13 +514,14 @@ def api_run():
 
 
 def run() -> None:
-    print("Finance Manager running at \033[1mhttp://localhost:5000\033[0m")
+    port = int(os.environ.get("PORT", 5000))
+    print(f"Finance Manager running at \033[1mhttp://localhost:{port}\033[0m")
     try:
         import gunicorn.app.base  # type: ignore
 
         class _StandaloneApp(gunicorn.app.base.BaseApplication):
             def load_config(self):
-                self.cfg.set("bind", "0.0.0.0:5000")
+                self.cfg.set("bind", f"0.0.0.0:{port}")
                 self.cfg.set("workers", 1)
                 self.cfg.set("worker_class", "gthread")
                 self.cfg.set("threads", 4)

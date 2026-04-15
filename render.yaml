@@ -1,0 +1,18 @@
+services:
+  - type: web
+    name: finance-manager
+    runtime: python
+    buildCommand: pip install uv && uv sync --locked
+    startCommand: uv run finance-server
+    # Render assigns $PORT automatically; the app reads it at startup.
+    envVars:
+      - key: FLASK_SECRET_KEY
+        generateValue: true        # Render generates a stable random value
+      - key: ANTHROPIC_API_KEY
+        sync: false                # Set manually in Render dashboard
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+      - key: APP_URL
+        sync: false                # Set to your Render URL, e.g. https://finance-manager.onrender.com
