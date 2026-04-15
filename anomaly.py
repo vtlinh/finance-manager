@@ -1,6 +1,7 @@
 import json
 import os
 from collections import defaultdict
+from datetime import date
 
 from llm import llm_prompt
 
@@ -29,15 +30,16 @@ def _monthly_totals_by_top_cat(groups: list[dict]) -> dict[str, dict[str, float]
 
 
 def detect_monthly_anomalies(groups: list[dict]) -> dict:
-    """For each uncached month with 2+ prior months of data, ask LLM for anomaly notes."""
+    """For each uncached past month with 6+ prior months of data, ask LLM for anomaly notes."""
     anomaly_cache = load_anomaly_cache()
 
     monthly_totals = _monthly_totals_by_top_cat(groups)
-    months = sorted(monthly_totals.keys())
+    current_month = date.today().strftime("%Y-%m")
+    months = sorted(m for m in monthly_totals if m != current_month)
 
     to_analyze = [
         m for i, m in enumerate(months)
-        if m not in anomaly_cache and i >= 2  # need at least 2 prior months
+        if m not in anomaly_cache and i >= 6  # need at least 6 prior months
     ]
 
     if not to_analyze:
@@ -47,8 +49,9 @@ def detect_monthly_anomalies(groups: list[dict]) -> dict:
 
     print(f"Analyzing {len(to_analyze)} month(s) for spending anomalies...")
     for month in to_analyze:
+        print(f"  Analyzing {month}...")
         idx = months.index(month)
-        prior = months[max(0, idx - 3):idx]  # up to 3 prior months
+        prior = months[max(0, idx - 6):idx]  # up to 6 prior months
 
         all_cats = sorted({
             cat
@@ -84,7 +87,7 @@ Return a JSON array of objects, each with:
 If nothing is unusual, return [].
 Example: [{{"note": "Food & Drink up 52% ($748 vs avg $491)", "amount": 748}}, {{"note": "No Entertainment this month (typically ~$95/month)", "amount": 95}}]"""
 
-        items = json.loads(llm_prompt(prompt))
+        items = llm_prompt(prompt)
         items.sort(key=lambda x: x.get("amount", 0), reverse=True)
         anomaly_cache[month] = [item["note"] for item in items]
 
