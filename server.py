@@ -407,7 +407,8 @@ def google_callback():
         state=state,
         redirect_uri=_callback_url(),
     )
-    flow.fetch_token(authorization_response=request.url)
+    auth_response = request.url.replace("http://", "https://", 1)
+    flow.fetch_token(authorization_response=auth_response)
     creds = flow.credentials
     session["google_token"] = _enc(creds.to_json())
     session.pop("google_oauth_state", None)
