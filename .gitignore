@@ -11,9 +11,9 @@ manager/.monarch_transactions
 manager/.monarch_transactions.json
 .debug
 
-# Claude Code
-.claude/
-CLAUDE.md
+# Claude Code runtime/local files
+.claude/scheduled_tasks.lock
+.claude/settings.local.json
 
 # Render
 render*.yaml
