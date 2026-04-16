@@ -126,7 +126,7 @@ Only include files that need to change. Write the complete new file content, not
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add -A
           DIAGNOSIS=$(python3 -c "import json; print(json.load(open('claude_fix.json'))['diagnosis'])")
-          git commit -m "fix: $DIAGNOSIS (auto-fixed by Claude)"
+          git commit -m "fix: $DIAGNOSIS (auto-fixed by Claude) [skip ci]"
           git push
 
       - name: Fail if tests still broken
