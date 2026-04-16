@@ -322,3 +322,59 @@ def test_api_run_subprocess_failure_streams_error(client):
         data = resp.data.decode()
     assert "error" in data
     assert "Failed to start process" in data
+
+
+# ── POST /api/stop ─────────────────────────────────────────────────────────────
+
+def test_api_stop_no_running_process(client):
+    """api/stop returns ok even when no process is running."""
+    server._run_proc = None
+    resp = client.post("/api/stop")
+    assert resp.get_json()["status"] == "ok"
+
+
+def test_api_stop_kills_running_process(client):
+    """api/stop terminates the running process and sets the stopped flag."""
+    mock_proc = MagicMock()
+    mock_proc.poll.return_value = None  # process is running
+    server._run_proc = mock_proc
+    server._run_stopped = False
+
+    resp = client.post("/api/stop")
+
+    assert resp.get_json()["status"] == "ok"
+    mock_proc.terminate.assert_called_once()
+    assert server._run_stopped is True
+
+
+def test_api_stop_ignores_already_finished_process(client):
+    """api/stop does not terminate a process that has already exited."""
+    mock_proc = MagicMock()
+    mock_proc.poll.return_value = 0  # process already finished
+    server._run_proc = mock_proc
+    server._run_stopped = False
+
+    resp = client.post("/api/stop")
+
+    assert resp.get_json()["status"] == "ok"
+    mock_proc.terminate.assert_not_called()
+    assert server._run_stopped is False
+
+
+def test_api_run_emits_stopped_event_when_terminated(client):
+    """When _run_stopped is set, api/run SSE stream emits a 'stopped' event."""
+    mock_proc = MagicMock()
+    mock_proc.stdout = iter([])
+    mock_proc.returncode = 1
+    mock_proc.wait = MagicMock()
+
+    def fake_popen(*args, **kwargs):
+        server._run_stopped = True  # simulate stop being called during the run
+        return mock_proc
+
+    with patch("subprocess.Popen", side_effect=fake_popen):
+        resp = client.get("/api/run")
+        data = resp.data.decode()
+
+    assert "stopped" in data
+    assert "done" not in data

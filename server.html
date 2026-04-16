@@ -359,7 +359,7 @@ async function transitionToSpreadsheet() {
 }
 function goBack() {
   if (runEventSource) { runEventSource.close(); runEventSource = null; }
-  step--;
+  step = step >= 2 ? 1 : step - 1;
   renderProgress();
   renderStep();
 }
@@ -768,8 +768,10 @@ function renderRun() {
 
       <div id="run-area" style="display:${google_token && google_configured ? "" : "none"}">
         <div class="terminal" id="terminal"></div>
-        <div class="nav" id="post-run-nav" style="display:none; margin-top:1rem">
+        <div class="nav" style="margin-top:1rem">
           <button class="btn btn-secondary" onclick="goBack()">← Back</button>
+          <button class="btn btn-secondary" id="stop-btn" onclick="stopScript()" style="display:none">⏹ Stop</button>
+          <button class="btn btn-primary" id="retry-btn" onclick="runScript()" style="display:none">↺ Retry</button>
           <a id="sheet-btn" class="btn btn-primary" href="#" target="_blank"
              style="display:none; text-decoration:none">📊 Open Google Spreadsheet</a>
         </div>
@@ -786,9 +788,18 @@ function onRunAuthDone() {
   runScript();
 }
 
+function stopScript() {
+  post("/api/stop", {});
+  const btn = document.getElementById("stop-btn");
+  if (btn) { btn.disabled = true; btn.textContent = "Stopping…"; }
+}
+
 function runScript() {
   if (runEventSource) { runEventSource.close(); runEventSource = null; }
-  document.getElementById("post-run-nav").style.display = "none";
+  const stopBtn = document.getElementById("stop-btn");
+  if (stopBtn) { stopBtn.style.display = ""; stopBtn.disabled = false; stopBtn.textContent = "⏹ Stop"; }
+  document.getElementById("retry-btn").style.display = "none";
+  document.getElementById("sheet-btn").style.display = "none";
   const term = document.getElementById("terminal");
   term.innerHTML = "";
 
@@ -819,8 +830,17 @@ function runScript() {
       term.scrollTop = term.scrollHeight;
       const btn = document.getElementById("sheet-btn");
       if (btn) { btn.href = data.url; btn.style.display = ""; }
-      document.getElementById("post-run-nav").style.display = "flex";
+      document.getElementById("stop-btn").style.display = "none";
       step++; renderProgress();
+      return;
+    } else if (data.type === "stopped") {
+      runEventSource.close(); runEventSource = null;
+      p.className = "err";
+      p.textContent = "⏹ Stopped.";
+      term.appendChild(p);
+      term.scrollTop = term.scrollHeight;
+      document.getElementById("stop-btn").style.display = "none";
+      document.getElementById("retry-btn").style.display = "";
       return;
     } else if (data.type === "error") {
       runEventSource.close(); runEventSource = null;
@@ -828,7 +848,8 @@ function runScript() {
       p.textContent = "✗ " + data.text;
       term.appendChild(p);
       term.scrollTop = term.scrollHeight;
-      document.getElementById("post-run-nav").style.display = "flex";
+      document.getElementById("stop-btn").style.display = "none";
+      document.getElementById("retry-btn").style.display = "";
       return;
     }
 
@@ -842,7 +863,8 @@ function runScript() {
     p.className = "err";
     p.textContent = "Connection lost.";
     term.appendChild(p);
-    document.getElementById("post-run-nav").style.display = "flex";
+    document.getElementById("stop-btn").style.display = "none";
+    document.getElementById("retry-btn").style.display = "";
   };
 }
 

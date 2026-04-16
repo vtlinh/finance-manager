@@ -50,6 +50,9 @@ app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(days=365)
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 app.config["SESSION_COOKIE_HTTPONLY"] = True
 
+_run_proc: subprocess.Popen | None = None
+_run_stopped: bool = False
+
 
 # ── Fernet encryption for sensitive session cookie values ──────────────────────
 
@@ -533,6 +536,8 @@ def api_run():
     env["PYTHONUNBUFFERED"] = "1"
 
     def _generate():
+        global _run_proc, _run_stopped
+        _run_stopped = False
         try:
             proc = subprocess.Popen(
                 [sys.executable, "-m", "manager.main"],
@@ -544,6 +549,7 @@ def api_run():
                 cwd=str(BASE_DIR),
                 env=env,
             )
+            _run_proc = proc
         except Exception as exc:
             try:
                 os.unlink(cfg_path)
@@ -564,13 +570,16 @@ def api_run():
             yield f"data: {json.dumps({'type': 'error', 'text': f'Stream error: {exc}'})}\n\n"
             return
         finally:
+            _run_proc = None
             # Subprocess deletes cfg_path on startup; clean up here if it didn't.
             try:
                 os.unlink(cfg_path)
             except OSError:
                 pass
         sid = config.get("SPREADSHEET_ID", "")
-        if proc.returncode == 0:
+        if _run_stopped:
+            yield f"data: {json.dumps({'type': 'stopped'})}\n\n"
+        elif proc.returncode == 0:
             url = f"https://docs.google.com/spreadsheets/d/{sid}"
             yield f"data: {json.dumps({'type': 'done', 'url': url})}\n\n"
         else:
@@ -581,6 +590,15 @@ def api_run():
         mimetype="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+
+@app.route("/api/stop", methods=["POST"])
+def api_stop():
+    global _run_proc, _run_stopped
+    if _run_proc and _run_proc.poll() is None:
+        _run_stopped = True
+        _run_proc.terminate()
+    return jsonify({"status": "ok"})
 
 
 def run() -> None:
