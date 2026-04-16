@@ -64,11 +64,11 @@ def test_export_hides_cache_tabs_not_deletes():
          patch("manager.sheets.writer.generate_all_summary_insights", return_value={"2024": []}):
         export(categorized, {})
 
-    # Cache tabs should be hidden
+    # Cache tabs should be left untouched (not hidden, not deleted)
     for ws in sh.worksheets():
         if ws.title.startswith("_"):
-            ws.hide.assert_called_once()
-            sh.del_worksheet.assert_not_called()
+            ws.hide.assert_not_called()
+    sh.del_worksheet.assert_not_called()
 
 
 def test_export_deletes_stale_non_cache_tabs():

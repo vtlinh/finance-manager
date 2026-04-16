@@ -45,10 +45,9 @@ def export(categorized: list[dict], anomalies: dict) -> None:
         if ws.title in expected:
             continue
         if ws.title.startswith("_"):
-            ws.hide()  # cache tabs — keep but ensure hidden
-        else:
-            print(f"Removing old tab: {ws.title}")
-            sh.del_worksheet(ws)
+            continue  # cache tabs — leave untouched
+        print(f"Removing old tab: {ws.title}")
+        sh.del_worksheet(ws)
 
     # Reorder tabs chronologically: Spending {year}, Summary {year} for each year
     desired_order = [title for year in years for title in [f"Spending {year}", f"Summary {year}"]]
