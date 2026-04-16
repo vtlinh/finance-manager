@@ -57,10 +57,10 @@ def detect_monthly_anomalies(groups: list[dict]) -> dict:
 
     if not to_analyze:
         cached_count = sum(1 for m in months if m in anomaly_cache)
-        print(f"All {cached_count} month(s) loaded from anomaly cache — no LLM call needed.\n")
+        print(f"All {cached_count} month(s) loaded from anomaly cache — no LLM call needed.")
         return anomaly_cache
 
-    print(f"Analyzing {len(to_analyze)} month(s) for spending anomalies...")
+    print(f"Analyzing {len(to_analyze)} month(s) for spending anomalies...", end=" ", flush=True)
 
     prompts: list[tuple[str, str]] = []
     for month in to_analyze:
@@ -104,5 +104,5 @@ Return an empty anomalies list if nothing is unusual."""
         anomaly_cache[month] = [item["note"] for item in items]
 
     sheets_cache.write_cache(_CACHE_TAB, anomaly_cache)
-    print(f"Anomaly analysis complete.\n")
+    print("Anomaly analysis complete.")
     return anomaly_cache

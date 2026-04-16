@@ -102,7 +102,6 @@ def llm_batch_structured(
 
     client = _get_client()
     batch = client.messages.batches.create(requests=requests)
-    print(f"Batch submitted ({len(requests)} requests) — this may take a few minutes.", flush=True)
 
     is_tty = sys.stdout.isatty()
     dots = 0
@@ -111,8 +110,6 @@ def llm_batch_structured(
         if batch.processing_status == "ended":
             if is_tty:
                 print()  # newline after inline dots
-            else:
-                print("\r" + "." * dots, flush=True)  # flush final dot line
             break
         dots = dots % 10 + 1
         if is_tty:
@@ -121,7 +118,7 @@ def llm_batch_structured(
             else:
                 print(".", end="", flush=True)
         else:
-            # Pipe mode: prefix \r so the server can emit an "update last line" SSE event
+            # Pipe mode: \r prefix signals server to overwrite the last SSE line
             print("\r" + "." * dots, flush=True)
         time.sleep(poll_interval)
 

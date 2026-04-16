@@ -498,7 +498,7 @@ def api_run():
                 text = line.rstrip("\n")
                 if text.startswith("\r"):
                     yield f"data: {json.dumps({'type': 'update_last', 'text': text[1:]})}\n\n"
-                else:
+                elif text.strip():
                     yield f"data: {json.dumps({'type': 'line', 'text': text.rstrip()})}\n\n"
             proc.wait()
         except Exception as exc:
