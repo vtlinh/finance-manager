@@ -11,6 +11,7 @@ import gspread
 from dotenv import load_dotenv
 
 from .login import Google
+from .llm import llm_structured
 
 load_dotenv()
 
@@ -243,14 +244,25 @@ def write_spending_sheet(ws: gspread.Worksheet, groups: list[dict], anomaly_cach
     ws.spreadsheet.batch_update({"requests": note_requests})
 
 
-def write_summary_sheet(
-    ws: gspread.Worksheet,
+_SUMMARY_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "insights": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "Interesting spending observations sorted by dollar impact (largest first)",
+        }
+    },
+    "required": ["insights"],
+}
+
+
+def _generate_summary_insights(
     year_groups: list[dict],
     prev_year_groups: list[dict],
-    anomaly_cache: dict,
     year: str,
-) -> None:
-    """Write a summary tab: year-over-year totals by top-level category, then anomalies."""
+) -> list[str]:
+    """Ask the LLM for notable year-over-year spending insights."""
 
     def top_totals(groups: list[dict]) -> dict[str, float]:
         totals: dict[str, float] = defaultdict(float)
@@ -259,48 +271,78 @@ def write_summary_sheet(
             totals[top] += g["amount"]
         return totals
 
-    curr = top_totals(year_groups)
-    prev = top_totals(prev_year_groups)
-    has_prev = bool(prev_year_groups)
+    curr = {cat: round(-amt, 2) for cat, amt in top_totals(year_groups).items()}
+    prev = {cat: round(-amt, 2) for cat, amt in top_totals(prev_year_groups).items()} if prev_year_groups else {}
     prev_year = str(int(year) - 1)
 
-    all_cats = sorted(set(curr) | set(prev))
+    curr_total = round(sum(curr.values()), 2)
+    prev_total = round(sum(prev.values()), 2) if prev else None
 
-    # ── Year summary table ────────────────────────────────────────────────────
-    if has_prev:
-        header = ["Category", prev_year, year, "Change ($)", "Change (%)"]
+    # Build a concise text table
+    all_cats = sorted(set(curr) | set(prev), key=lambda c: -curr.get(c, 0))
+    lines = []
+    if prev:
+        lines.append(f"{'Category':<30} {prev_year:>10} {year:>10} {'Change':>10} {'%':>7}")
+        lines.append("-" * 69)
+        for cat in all_cats:
+            c = curr.get(cat, 0)
+            p = prev.get(cat, 0)
+            chg = c - p
+            pct = f"{chg/p*100:+.1f}%" if p else "new"
+            lines.append(f"{cat:<30} {p:>10,.0f} {c:>10,.0f} {chg:>+10,.0f} {pct:>7}")
+        lines.append("-" * 69)
+        lines.append(f"{'Total':<30} {prev_total:>10,.0f} {curr_total:>10,.0f} {curr_total-prev_total:>+10,.0f} {(curr_total-prev_total)/prev_total*100:>+6.1f}%")
     else:
-        header = ["Category", year]
+        lines.append(f"{'Category':<30} {year:>10}")
+        lines.append("-" * 42)
+        for cat in all_cats:
+            lines.append(f"{cat:<30} {curr.get(cat,0):>10,.0f}")
+        lines.append("-" * 42)
+        lines.append(f"{'Total':<30} {curr_total:>10,.0f}")
 
-    rows: list[list] = [header]
+    table = "\n".join(lines)
+    has_prev = bool(prev)
 
-    for cat in all_cats:
-        c = round(-curr.get(cat, 0.0), 2)
-        p = round(-prev.get(cat, 0.0), 2) if has_prev else None
-        if has_prev:
-            chg = round(c - p, 2)
-            pct = round((c - p) / p * 100, 1) if p else ""
-            rows.append([cat, p or "", c or "", chg or "", pct])
-        else:
-            rows.append([cat, c or ""])
+    prompt = f"""You are a personal finance analyst reviewing annual spending.
 
-    # Total row
-    c_total = round(-sum(curr.values()), 2)
-    if has_prev:
-        p_total = round(-sum(prev.values()), 2)
-        chg = round(c_total - p_total, 2)
-        pct = round((c_total - p_total) / p_total * 100, 1) if p_total else ""
-        rows.append(["Total", p_total, c_total, chg, pct])
-    else:
-        rows.append(["Total", c_total])
+{'Year-over-year comparison:' if has_prev else f'Spending summary for {year}:'}
 
-    n_summary_rows = len(rows)  # used for formatting below
+{table}
+
+{'Identify the most interesting changes from ' + prev_year + ' to ' + year + '.' if has_prev else f'Summarize the key spending patterns for {year}.'}
+Focus on facts that involve the largest dollar amounts.
+Be concise and specific — include dollar figures and percentages.
+Skip obvious or trivial observations.
+Return 4–7 insights sorted by financial impact (largest first)."""
+
+    result = llm_structured(prompt, _SUMMARY_SCHEMA, "report_summary")
+    return result.get("insights", [])
+
+
+def write_summary_sheet(
+    ws: gspread.Worksheet,
+    year_groups: list[dict],
+    prev_year_groups: list[dict],
+    anomaly_cache: dict,
+    year: str,
+    insights: list[str],
+) -> None:
+    """Write a summary tab: LLM insights then anomalies."""
+
+    # ── Insights section ──────────────────────────────────────────────────────
+    rows: list[list] = [
+        [f"{year} Summary"],
+        [""],
+    ]
+    for insight in insights:
+        rows.append([f"• {insight}"])
 
     # ── Anomalies section ─────────────────────────────────────────────────────
     year_months = sorted({g["month"] for g in year_groups})
     noted = [(m, anomaly_cache.get(m, [])) for m in year_months if anomaly_cache.get(m)]
 
-    rows.append([""])  # blank separator
+    rows.append([""])
+    anomaly_title_row = len(rows) + 1
     rows.append(["Spending Anomalies"])
     rows.append(["Month", "Anomaly"])
     if noted:
@@ -314,23 +356,13 @@ def write_summary_sheet(
     ws.clear()
     ws.update(rows, value_input_option="USER_ENTERED")
 
-    n_cols = len(header)
-    last_col_letter = chr(ord("A") + n_cols - 1)
+    ws.format("A1", {"textFormat": {"bold": True, "fontSize": 14}})
+    ws.format(f"A{anomaly_title_row}", {"textFormat": {"bold": True}})
+    ws.format(f"A{anomaly_title_row + 1}:B{anomaly_title_row + 1}", {"textFormat": {"bold": True}})
 
-    # Bold header and total row
-    ws.format(f"A1:{last_col_letter}1", {"textFormat": {"bold": True}})
-    ws.format(f"A{n_summary_rows}:{last_col_letter}{n_summary_rows}", {"textFormat": {"bold": True}})
-
-    # Bold anomaly section header
-    anomaly_header_row = n_summary_rows + 3
-    ws.format(f"A{anomaly_header_row}:B{anomaly_header_row}", {"textFormat": {"bold": True}})
-
-    # Currency format for numeric columns (skip category column A)
-    if n_cols > 1:
-        num_range = f"B2:{last_col_letter}{n_summary_rows}"
-        ws.format(num_range, {"numberFormat": {"type": "CURRENCY", "pattern": "$#,##0.00"}})
-
-    ws.freeze(rows=1, cols=1)
+    ws.spreadsheet.batch_update({"requests": [
+        {"autoResizeDimensions": {"dimensions": {"sheetId": ws.id, "dimension": "COLUMNS", "startIndex": 0, "endIndex": 2}}},
+    ]})
 
 
 # ── Public API ─────────────────────────────────────────────────────────────────
@@ -359,8 +391,12 @@ def export(categorized: list[dict], anomalies: dict) -> None:
         print(f"Writing Spending {year}...")
         write_spending_sheet(get_or_create(f"Spending {year}"), year_groups, anomalies)
 
+        print(f"Generating summary for {year}...", end=" ", flush=True)
+        insights = _generate_summary_insights(year_groups, prev_year_groups, year)
+        print("done")
+
         print(f"Writing Summary {year}...")
-        write_summary_sheet(get_or_create(f"Summary {year}"), year_groups, prev_year_groups, anomalies, year)
+        write_summary_sheet(get_or_create(f"Summary {year}"), year_groups, prev_year_groups, anomalies, year, insights)
 
     # Now safe to remove stale tabs — expected tabs already exist
     for ws in sh.worksheets():
