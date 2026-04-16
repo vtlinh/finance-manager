@@ -298,6 +298,27 @@ def sheets_save():
     return jsonify({"status": "ok"})
 
 
+@app.route("/api/sheets/check", methods=["POST"])
+def sheets_check():
+    """Verify the stored spreadsheet ID still exists; clear it if not."""
+    sid = session.get("spreadsheet_id", "")
+    if not sid:
+        return jsonify({"status": "missing"})
+    google_token = _dec(session.get("google_token", ""))
+    if not google_token:
+        return jsonify({"status": "no_token"})
+    try:
+        import gspread  # type: ignore
+        from manager.login import Google
+        creds = Google.get_credentials(token_json=google_token)
+        gc = gspread.authorize(creds)
+        gc.open_by_key(sid)
+        return jsonify({"status": "ok", "spreadsheet_id": sid})
+    except Exception:
+        session.pop("spreadsheet_id", None)
+        return jsonify({"status": "not_found"})
+
+
 @app.route("/api/sheets/create", methods=["POST"])
 def sheets_create():
     """Create a new Google Sheet named 'Finance Manager' and return its ID."""

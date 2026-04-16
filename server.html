@@ -556,7 +556,14 @@ async function submitMonarch() {
 }
 
 // ── Step 2: Spreadsheet ───────────────────────────────────────────────────────
-function renderSpreadsheet() {
+async function renderSpreadsheet() {
+  // Validate stored sheet ID on first render; clear it if the sheet was deleted
+  if (sheetMode === null && status.spreadsheet_id) {
+    const check = await post("/api/sheets/check", {});
+    if (check.status === "not_found") {
+      status.spreadsheet_id = "";
+    }
+  }
   const { spreadsheet_id, google_token } = status;
   if (sheetMode === null) sheetMode = spreadsheet_id ? "existing" : "create";
 
