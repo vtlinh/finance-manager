@@ -244,8 +244,7 @@ def monarch_mode():
     return jsonify({"status": "ok"})
 
 
-_CSV_REQUIRED_COLUMNS = {"Date", "Merchant", "Category", "Account",
-                         "Original Statement", "Notes", "Amount", "Tags", "Owner"}
+_CSV_REQUIRED_COLUMNS = {"Date", "Merchant", "Amount", "Category"}
 
 
 @app.route("/api/transactions/upload", methods=["POST"])

@@ -20,6 +20,9 @@ finance-server = "server:run"
 [tool.hatch.build.targets.wheel]
 packages = ["manager"]
 
+[dependency-groups]
+dev = ["pytest"]
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
