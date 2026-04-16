@@ -42,6 +42,25 @@ def _monthly_totals_by_top_cat(groups: list[dict]) -> dict[str, dict[str, float]
     return totals
 
 
+def _dominant_merchants(groups: list[dict], monthly_totals: dict, threshold: float = 0.20) -> dict:
+    """Returns {month: [(merchant, category, spend, pct), ...]} for merchant groups whose
+    absolute spend is >= threshold of their top-level category total for that month."""
+    result: dict[str, list] = defaultdict(list)
+    for g in groups:
+        top = g["path"][0] if g.get("path") else "Uncategorized"
+        month = g["month"]
+        cat_total = abs(monthly_totals[month].get(top, 0.0))
+        if cat_total == 0:
+            continue
+        spend = abs(g["amount"])
+        pct = spend / cat_total
+        if pct >= threshold:
+            result[month].append((g["name"], top, spend, pct))
+    for month in result:
+        result[month].sort(key=lambda x: x[2], reverse=True)
+    return dict(result)
+
+
 def detect_monthly_anomalies(groups: list[dict]) -> dict:
     """For each uncached past month with 6+ prior months of data, ask LLM for anomaly notes."""
     anomaly_cache = sheets_cache.read_cache(_CACHE_TAB)
@@ -61,6 +80,8 @@ def detect_monthly_anomalies(groups: list[dict]) -> dict:
         return anomaly_cache
 
     print(f"Analyzing {len(to_analyze)} month(s) for spending anomalies...", flush=True)
+
+    dominant = _dominant_merchants(groups, monthly_totals)
 
     prompts: list[tuple[str, str]] = []
     for month in to_analyze:
@@ -84,13 +105,22 @@ def detect_monthly_anomalies(groups: list[dict]) -> dict:
                 row += (f"{amt:,.0f}" if amt else "").rjust(col_w)
             rows.append(row)
 
+        big = dominant.get(month, [])
+        merchant_hint = ""
+        if big:
+            lines = ["", "Single transactions ≥20% of their category in this month:"]
+            for name, cat, spend, pct in big:
+                lines.append(f"  • {name}: ${spend:,.0f} ({pct:.0%} of {cat})")
+            merchant_hint = "\n".join(lines)
+
         prompt = f"""You are a personal finance analyst reviewing monthly spending.
 * marks the month being analyzed.
 
-{chr(10).join(rows)}
+{chr(10).join(rows)}{merchant_hint}
 
 Identify notable anomalies in {month} vs the reference months.
 Focus on: large increases (>30%), large decreases (>30%), categories that appeared or disappeared.
+When a dominant transaction is listed above, mention the merchant by name in your note.
 Be concise and specific (include dollar amounts).
 Return an empty anomalies list if nothing is unusual."""
 
