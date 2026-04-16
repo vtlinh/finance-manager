@@ -582,7 +582,7 @@ function renderSpreadsheet() {
         <div class="field">
           <label>Spreadsheet ID</label>
           <input type="text" id="sid-existing"
-                 placeholder="1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgVE2upms"
+                 placeholder=""
                  value="${spreadsheet_id || ""}">
         </div>
       </div>
@@ -800,6 +800,7 @@ function runScript() {
       const btn = document.getElementById("sheet-btn");
       if (btn) { btn.href = data.url; btn.style.display = ""; }
       document.getElementById("post-run-nav").style.display = "flex";
+      step++; renderProgress();
       return;
     } else if (data.type === "error") {
       runEventSource.close(); runEventSource = null;
