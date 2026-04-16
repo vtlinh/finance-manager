@@ -1,5 +1,4 @@
 import os
-import sys
 import time
 
 import anthropic
@@ -103,23 +102,10 @@ def llm_batch_structured(
     client = _get_client()
     batch = client.messages.batches.create(requests=requests)
 
-    is_tty = sys.stdout.isatty()
-    dots = 0
     while True:
         batch = client.messages.batches.retrieve(batch.id)
         if batch.processing_status == "ended":
-            if is_tty:
-                print()  # newline after inline dots
             break
-        dots = dots % 10 + 1
-        if is_tty:
-            if dots == 1:
-                print("\r" + " " * 10 + "\r.", end="", flush=True)
-            else:
-                print(".", end="", flush=True)
-        else:
-            # Pipe mode: \r prefix signals server to overwrite the last SSE line
-            print("\r" + "." * dots, flush=True)
         time.sleep(poll_interval)
 
     results: dict[str, dict] = {}
