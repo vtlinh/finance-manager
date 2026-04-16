@@ -338,6 +338,25 @@ function renderStep() {
   [renderMonarch, renderSpreadsheet, renderRun][step]();
 }
 function goNext() { step++; renderProgress(); renderStep(); }
+function showLoadingCard() {
+  document.getElementById("content").innerHTML = `
+    <div class="card" style="display:flex;align-items:center;justify-content:center;gap:.75rem;min-height:180px">
+      <span class="spin" style="width:24px;height:24px;border-width:3px;border-color:rgba(37,99,235,.2);border-top-color:var(--primary)"></span>
+      <span style="color:var(--muted);font-size:.9rem">Loading…</span>
+    </div>`;
+}
+// Transition from Monarch step → Spreadsheet step:
+// shows spinner immediately, does the sheet check, then renders step 2 synchronously.
+async function transitionToSpreadsheet() {
+  showLoadingCard();
+  if (sheetMode === null && status.spreadsheet_id) {
+    const check = await post("/api/sheets/check", {});
+    if (check.status === "not_found") status.spreadsheet_id = "";
+  }
+  step++;
+  renderProgress();
+  renderSpreadsheet();
+}
 function goBack() {
   if (runEventSource) { runEventSource.close(); runEventSource = null; }
   step--;
@@ -493,8 +512,9 @@ async function uploadCsv(input) {
 async function submitMonarchStep() {
   if (monarchMode === "csv") {
     if (!status.has_csv) { show("mm-alert", "Please upload a CSV file first.", "error"); return; }
+    setBtn("mm-btn", true, "Loading…");
     await post("/api/monarch/mode", { mode: "csv" });
-    goNext();
+    await transitionToSpreadsheet();
     return;
   }
   // Login mode
@@ -505,7 +525,7 @@ async function submitMonarchStep() {
     setBtn("mm-btn", true, "Verifying…");
     const res = await post("/api/monarch/validate", {});
     if (res.status === "ok") {
-      goNext();
+      await transitionToSpreadsheet();
     } else {
       // Session expired — clear saved state and drop back to the login form
       status.monarch_session = false;
@@ -530,14 +550,14 @@ async function submitMonarch() {
   const res = await post("/api/monarch/login", { email, password });
   if (res.status === "ok") {
     status.monarch_email = email;
-    goNext();
+    await transitionToSpreadsheet();
   } else if (res.status === "mfa_required") {
     if (mfa) {
       // Code was pre-filled — submit it automatically
       const mfaRes = await post("/api/monarch/mfa", { code: mfa });
       if (mfaRes.status === "ok") {
         status.monarch_email = email;
-        goNext();
+        await transitionToSpreadsheet();
       } else {
         setBtn("mm-btn", false, "Verify &amp; Next →");
         document.getElementById("mm-mfa").value = "";
@@ -556,14 +576,7 @@ async function submitMonarch() {
 }
 
 // ── Step 2: Spreadsheet ───────────────────────────────────────────────────────
-async function renderSpreadsheet() {
-  // Validate stored sheet ID on first render; clear it if the sheet was deleted
-  if (sheetMode === null && status.spreadsheet_id) {
-    const check = await post("/api/sheets/check", {});
-    if (check.status === "not_found") {
-      status.spreadsheet_id = "";
-    }
-  }
+function renderSpreadsheet() {
   const { spreadsheet_id, google_token } = status;
   if (sheetMode === null) sheetMode = spreadsheet_id ? "existing" : "create";
 

@@ -60,7 +60,7 @@ def detect_monthly_anomalies(groups: list[dict]) -> dict:
         print(f"All {cached_count} month(s) loaded from anomaly cache — no LLM call needed.")
         return anomaly_cache
 
-    print(f"Analyzing {len(to_analyze)} month(s) for spending anomalies...", end=" ", flush=True)
+    print(f"Analyzing {len(to_analyze)} month(s) for spending anomalies...", flush=True)
 
     prompts: list[tuple[str, str]] = []
     for month in to_analyze:

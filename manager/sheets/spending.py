@@ -1,6 +1,6 @@
 import gspread
 
-from .helpers import _month_label
+from .helpers import _month_label, retry_on_quota
 from .tree import _build_tree
 
 
@@ -83,6 +83,7 @@ def print_spreadsheet(groups: list[dict], anomaly_cache: dict) -> None:
                 print(f"    • {note}")
 
 
+@retry_on_quota
 def write_spending_sheet(ws: gspread.Worksheet, groups: list[dict], anomaly_cache: dict) -> None:
     root, months = _build_tree(groups)
 

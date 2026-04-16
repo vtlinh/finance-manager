@@ -3,7 +3,7 @@ from collections import defaultdict
 import gspread
 
 from ..llm import llm_structured
-from .helpers import _month_label
+from .helpers import _month_label, retry_on_quota
 
 _SUMMARY_SCHEMA = {
     "type": "object",
@@ -79,6 +79,7 @@ Return 4–7 insights sorted by financial impact (largest first)."""
     return result.get("insights", [])
 
 
+@retry_on_quota
 def write_summary_sheet(
     ws: gspread.Worksheet,
     year_groups: list[dict],
@@ -89,13 +90,15 @@ def write_summary_sheet(
 ) -> None:
     """Write a summary tab: LLM insights then anomalies."""
 
+    # Title and insights shifted one column right (start in column B)
     rows: list[list] = [
-        [f"{year} Summary"],
+        ["", f"{year} Summary"],
         [""],
     ]
     for insight in insights:
-        rows.append([f"• {insight}"])
+        rows.append(["", f"• {insight}"])
 
+    # Anomaly section stays at column A
     year_months = sorted({g["month"] for g in year_groups})
     noted = [(m, anomaly_cache.get(m, [])) for m in year_months if anomaly_cache.get(m)]
 
@@ -113,7 +116,7 @@ def write_summary_sheet(
     ws.clear()
     ws.update(rows, value_input_option="USER_ENTERED")
 
-    ws.format("A1", {"textFormat": {"bold": True, "fontSize": 14}})
+    ws.format("B1", {"textFormat": {"bold": True, "fontSize": 14}})
     ws.format(f"A{anomaly_title_row}", {"textFormat": {"bold": True}})
     ws.format(f"A{anomaly_title_row + 1}:B{anomaly_title_row + 1}", {"textFormat": {"bold": True}})
 
