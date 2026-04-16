@@ -1,0 +1,140 @@
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install uv
+        run: pip install uv
+
+      - name: Install dependencies
+        run: uv sync --locked
+
+      - name: Run tests
+        id: run_tests
+        run: uv run pytest --tb=short 2>&1 | tee test_output.txt
+        continue-on-error: true
+
+      - name: Auto-fix with Claude on failure
+        if: steps.run_tests.outcome == 'failure'
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          COMMIT_SHA: ${{ github.sha }}
+          COMMIT_MSG: ${{ github.event.head_commit.message }}
+        run: |
+          TEST_OUTPUT=$(cat test_output.txt)
+
+          # Ask Claude to diagnose and produce a fix
+          RESPONSE=$(python3 - <<'PYEOF'
+          import os, json, anthropic
+
+          test_output = open("test_output.txt").read()
+
+          # Read all relevant source files
+          import pathlib
+          src_files = {}
+          for path in pathlib.Path(".").rglob("*.py"):
+              if any(p in str(path) for p in ["manager/", "server.py", "tests/"]):
+                  try:
+                      src_files[str(path)] = path.read_text(encoding="utf-8")
+                  except Exception:
+                      pass
+
+          files_block = "\n\n".join(
+              f"### {name}\n```python\n{content}\n```"
+              for name, content in sorted(src_files.items())
+          )
+
+          client = anthropic.Anthropic()
+          message = client.messages.create(
+              model="claude-opus-4-6",
+              max_tokens=8096,
+              messages=[{
+                  "role": "user",
+                  "content": f"""The following pytest tests failed in the finance-manager project. Analyze the failure, identify the root cause, and produce the minimal code fix.
+
+## Test output
+```
+{test_output}
+```
+
+## Source files
+{files_block}
+
+Respond with a JSON object (no markdown) in this exact format:
+{{
+  "diagnosis": "one sentence root cause",
+  "fixes": [
+    {{"file": "path/to/file.py", "content": "entire new file content"}}
+  ]
+}}
+
+Only include files that need to change. Write the complete new file content, not a diff."""
+              }]
+          )
+
+          text = message.content[0].text.strip()
+          # Strip markdown code fences if present
+          if text.startswith("```"):
+              text = "\n".join(text.split("\n")[1:])
+          if text.endswith("```"):
+              text = "\n".join(text.split("\n")[:-1])
+          print(text)
+          PYEOF
+          )
+
+          echo "$RESPONSE" > claude_fix.json
+
+          # Apply the fixes
+          python3 - <<'PYEOF'
+          import json, pathlib
+
+          data = json.loads(open("claude_fix.json").read())
+          print(f"Diagnosis: {data['diagnosis']}")
+          for fix in data.get("fixes", []):
+              p = pathlib.Path(fix["file"])
+              p.parent.mkdir(parents=True, exist_ok=True)
+              p.write_text(fix["content"], encoding="utf-8")
+              print(f"Fixed: {fix['file']}")
+          PYEOF
+
+          # Run tests again to verify the fix works
+          uv run pytest --tb=short 2>&1 | tee test_output_after.txt
+          if [ ${PIPESTATUS[0]} -ne 0 ]; then
+            echo "Claude's fix did not resolve the tests — leaving for manual review"
+            exit 1
+          fi
+
+          # Commit and push the fix
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -A
+          DIAGNOSIS=$(python3 -c "import json; print(json.load(open('claude_fix.json'))['diagnosis'])")
+          git commit -m "fix: $DIAGNOSIS (auto-fixed by Claude)"
+          git push
+
+      - name: Fail if tests still broken
+        if: steps.run_tests.outcome == 'failure'
+        run: |
+          if [ -f test_output_after.txt ]; then
+            # Check if the after-fix run passed (exit 0 means passed)
+            uv run pytest --tb=short || exit 1
+          else
+            exit 1
+          fi
