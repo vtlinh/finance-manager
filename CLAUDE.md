@@ -93,9 +93,7 @@ curl -s -X POST "https://api.render.com/v1/services/srv-d7gelfm47okc73fkall0/dep
 
 ```
 ANTHROPIC_API_KEY
-MONARCH_EMAIL / MONARCH_PASSWORD
 GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET   # cloud OAuth
-SPREADSHEET_ID
 FLASK_SECRET_KEY
 USE_BATCH_LLM=1                           # enable Batches API
 ```
