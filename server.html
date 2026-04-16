@@ -311,7 +311,7 @@ let googlePollTimer = null;
 let monarchMode = "login";          // "login" | "csv"
 let runEventSource = null;
 let monarchModeUserSet = false;     // true once the user has manually picked a tab
-let sheetMode   = "existing"; // "existing" | "create"
+let sheetMode   = null; // "existing" | "create" — null means auto-detect from status
 
 // ── Bootstrap ─────────────────────────────────────────────────────────────────
 async function init() {
@@ -558,6 +558,7 @@ async function submitMonarch() {
 // ── Step 2: Spreadsheet ───────────────────────────────────────────────────────
 function renderSpreadsheet() {
   const { spreadsheet_id, google_token } = status;
+  if (sheetMode === null) sheetMode = spreadsheet_id ? "existing" : "create";
 
   document.getElementById("content").innerHTML = `
     <div class="card">
@@ -565,18 +566,18 @@ function renderSpreadsheet() {
       <div class="card-desc">Choose the spreadsheet where your finance summary will be exported.</div>
 
       <div class="seg-group">
-        <button class="seg-btn ${sheetMode === "existing" ? "active" : ""}"
-                onclick="setSheetMode('existing')">Use existing sheet</button>
         <button class="seg-btn ${sheetMode === "create" ? "active" : ""}"
                 onclick="setSheetMode('create')">Create new sheet</button>
+        <button class="seg-btn ${sheetMode === "existing" ? "active" : ""}"
+                onclick="setSheetMode('existing')">Use existing sheet</button>
       </div>
 
       <!-- Existing sheet section -->
       <div id="existing-section" style="display:${sheetMode === "existing" ? "" : "none"}">
         <div class="info">
           <strong>Where to find your Spreadsheet ID</strong>
-          The ID is the long string in the URL between <code>/d/</code> and <code>/edit</code>:
-          <code>docs.google.com/spreadsheets/d/<strong style="color:#1e40af">YOUR_ID_HERE</strong>/edit</code>
+          The ID is the long string in the URL between <code>/d/</code> and <code>/edit</code>:<br>
+          <code>docs.google.com/spreadsheets/d/<span style="color:#1e40af;font-weight:bold">YOUR_ID_HERE</span>/edit</code>
         </div>
         <div class="field">
           <label>Spreadsheet ID</label>
