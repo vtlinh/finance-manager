@@ -1,9 +1,13 @@
 from collections import defaultdict
+from datetime import date
 
 import gspread
 
 from ..llm import llm_batch_structured
+from .. import sheets_cache
 from .helpers import _month_label, retry_on_quota
+
+_CACHE_TAB = "_summary_cache"
 
 _SUMMARY_SCHEMA = {
     "type": "object",
@@ -79,7 +83,10 @@ Return 4–7 insights sorted by financial impact (largest first)."""
 def generate_all_summary_insights(
     years_data: list[tuple[str, list[dict], list[dict]]],
 ) -> dict[str, list[str]]:
-    """Generate insights for all years in a single batch LLM call.
+    """Generate insights for all years, using cache for completed past years.
+
+    The current year is always regenerated (still in progress).
+    Past years are cached in the '_summary_cache' sheet tab.
 
     Args:
         years_data: List of (year, year_groups, prev_year_groups) tuples.
@@ -87,13 +94,37 @@ def generate_all_summary_insights(
     Returns:
         Dict mapping year -> list of insight strings.
     """
-    print(f"Generating summaries for {len(years_data)} year(s)...", flush=True)
+    cache = sheets_cache.read_cache(_CACHE_TAB)
+    current_year = date.today().strftime("%Y")
+
+    to_generate = [
+        (year, year_groups, prev_year_groups)
+        for year, year_groups, prev_year_groups in years_data
+        if year not in cache or year == current_year
+    ]
+
+    cached_count = len(years_data) - len(to_generate)
+    if cached_count:
+        print(f"{cached_count} year summary/summaries loaded from cache.")
+    if not to_generate:
+        return {year: cache.get(year, []) for year, _, _ in years_data}
+
+    print(f"Generating summaries for {len(to_generate)} year(s)...", flush=True)
     prompts = [
         (year, _build_summary_prompt(year_groups, prev_year_groups, year))
-        for year, year_groups, prev_year_groups in years_data
+        for year, year_groups, prev_year_groups in to_generate
     ]
     results = llm_batch_structured(prompts, _SUMMARY_SCHEMA, "report_summary")
-    return {year: results.get(year, {}).get("insights", []) for year, _, _ in years_data}
+
+    for year, _, _ in to_generate:
+        insights = results.get(year, {}).get("insights", [])
+        cache[year] = insights
+
+    # Only persist cache for past years (current year is always regenerated)
+    to_persist = {y: v for y, v in cache.items() if y != current_year}
+    sheets_cache.write_cache(_CACHE_TAB, to_persist)
+
+    return {year: cache.get(year, []) for year, _, _ in years_data}
 
 
 @retry_on_quota

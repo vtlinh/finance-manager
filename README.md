@@ -112,7 +112,14 @@ The script will:
 
 ## Cache files
 
-LLM results (merchant categories and monthly anomalies) are cached in hidden worksheet tabs (`_merchant_cache`, `_anomaly_cache`) inside the target Google Sheet, so they are per-user and require no server-side storage.
+LLM results are cached in hidden worksheet tabs inside the target Google Sheet, so they are per-user and require no server-side storage.
+
+| Tab | Contents |
+|---|---|
+| `_merchant_cache` | Merchant → category path mappings |
+| `_anomaly_cache` | Monthly anomaly notes |
+| `_summary_cache` | Per-year spending insights (past years only) |
+| `_consolidation_cache` | Taxonomy consolidation mappings (keyed by path-set hash) |
 
 For CLI use, two local files are created the first time you run:
 

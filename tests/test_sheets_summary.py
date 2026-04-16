@@ -93,13 +93,82 @@ def test_generate_all_summary_insights_calls_batch_with_all_years():
         captured["prompts"] = prompts
         return {year: {"insights": []} for year, _ in prompts}
 
-    with patch("manager.sheets.summary.llm_batch_structured", side_effect=fake_batch):
+    with patch("manager.sheets.summary.llm_batch_structured", side_effect=fake_batch), \
+         patch("manager.sheets.summary.sheets_cache.read_cache", return_value={}), \
+         patch("manager.sheets.summary.sheets_cache.write_cache"):
         generate_all_summary_insights(years_data)
 
     # Should have sent all 3 years in a single batch call
     assert len(captured["prompts"]) == 3
     years_sent = [y for y, _ in captured["prompts"]]
     assert years_sent == ["2022", "2023", "2024"]
+
+
+def test_generate_all_summary_insights_uses_cache_for_past_years():
+    """Cached past years should not trigger LLM calls."""
+    years_data = [
+        ("2022", _groups("2022"), []),
+        ("2023", _groups("2023"), _groups("2022")),
+    ]
+    existing_cache = {"2022": ["Food spending was $6,000."]}
+    captured = {}
+
+    def fake_batch(prompts, schema, tag):
+        captured["prompts"] = prompts
+        return {year: {"insights": ["New insight."]} for year, _ in prompts}
+
+    with patch("manager.sheets.summary.llm_batch_structured", side_effect=fake_batch), \
+         patch("manager.sheets.summary.sheets_cache.read_cache", return_value=existing_cache), \
+         patch("manager.sheets.summary.sheets_cache.write_cache"):
+        out = generate_all_summary_insights(years_data)
+
+    # Only 2023 should be sent to LLM; 2022 served from cache
+    assert captured.get("prompts") is not None
+    years_sent = [y for y, _ in captured["prompts"]]
+    assert "2022" not in years_sent
+    assert "2023" in years_sent
+    # 2022 result should come from cache
+    assert out["2022"] == ["Food spending was $6,000."]
+
+
+def test_generate_all_summary_insights_writes_only_past_years_to_cache():
+    """Current year should not be written to cache."""
+    from datetime import date
+    current_year = date.today().strftime("%Y")
+    past_year = str(int(current_year) - 1)
+
+    years_data = [
+        (past_year, _groups(past_year), []),
+        (current_year, _groups(current_year), _groups(past_year)),
+    ]
+    written = {}
+
+    def fake_write(tab, data):
+        written.update(data)
+
+    with patch("manager.sheets.summary.llm_batch_structured",
+               return_value={past_year: {"insights": ["Past insight."]},
+                             current_year: {"insights": ["Current insight."]}}), \
+         patch("manager.sheets.summary.sheets_cache.read_cache", return_value={}), \
+         patch("manager.sheets.summary.sheets_cache.write_cache", side_effect=fake_write):
+        generate_all_summary_insights(years_data)
+
+    assert past_year in written
+    assert current_year not in written
+
+
+def test_generate_all_summary_insights_skips_llm_when_all_cached():
+    """No LLM call should be made when all past years are already cached."""
+    years_data = [("2022", _groups("2022"), []), ("2023", _groups("2023"), _groups("2022"))]
+    cache = {"2022": ["Insight A."], "2023": ["Insight B."]}
+
+    with patch("manager.sheets.summary.llm_batch_structured") as mock_llm, \
+         patch("manager.sheets.summary.sheets_cache.read_cache", return_value=cache), \
+         patch("manager.sheets.summary.sheets_cache.write_cache"):
+        out = generate_all_summary_insights(years_data)
+
+    mock_llm.assert_not_called()
+    assert out == {"2022": ["Insight A."], "2023": ["Insight B."]}
 
 
 def test_generate_all_summary_insights_missing_year_returns_empty_list():

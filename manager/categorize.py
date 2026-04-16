@@ -1,3 +1,4 @@
+import hashlib
 import json
 from collections import defaultdict
 
@@ -42,6 +43,7 @@ _NORMALIZE_SCHEMA = {
 }
 
 _CACHE_TAB = "_merchant_cache"
+_CONSOLIDATION_CACHE_TAB = "_consolidation_cache"
 
 _CATEGORIZE_RULES = """Rules for the path array:
 - Use 2 levels for clear-cut merchants (e.g. ["Utilities", "Internet"]).
@@ -170,15 +172,27 @@ def _normalize_categories(cache: dict, merchant_names: set[str]) -> None:
     if len(current_paths) <= 100 and len(root_cats) <= 15:
         return
 
-    print(
-        f"Found {len(current_paths)} unique paths across {len(root_cats)} root categories "
-        f"— consolidating to max 100 paths / 15 roots..."
-    )
-
+    # Hash the path-set so we can skip the LLM if we've already consolidated this exact taxonomy
     paths_list = sorted(current_paths)
-    paths_display = "\n".join(f"{i}: {json.dumps(list(p))}" for i, p in enumerate(paths_list))
+    paths_hash = hashlib.sha256(
+        json.dumps([list(p) for p in paths_list]).encode()
+    ).hexdigest()[:16]
 
-    prompt = f"""You are a personal finance taxonomy expert. The following category paths are used to classify merchants:
+    consolidation_cache = sheets_cache.read_cache(_CONSOLIDATION_CACHE_TAB)
+    cached_mapping_raw = consolidation_cache.get(paths_hash)
+    if cached_mapping_raw is not None:
+        # Cached mapping is stored as {json_str_of_path: new_path_list}
+        mapping = {tuple(json.loads(k)): v for k, v in cached_mapping_raw.items()}
+        print(f"Applying cached consolidation mapping ({len(mapping)} paths).")
+    else:
+        print(
+            f"Found {len(current_paths)} unique paths across {len(root_cats)} root categories "
+            f"— consolidating to max 100 paths / 15 roots..."
+        )
+
+        paths_display = "\n".join(f"{i}: {json.dumps(list(p))}" for i, p in enumerate(paths_list))
+
+        prompt = f"""You are a personal finance taxonomy expert. The following category paths are used to classify merchants:
 
 {paths_display}
 
@@ -186,8 +200,13 @@ Consolidate them into at most 100 unique paths with at most 15 root categories.
 Merge only truly similar categories; preserve meaningful specificity where it matters.
 All {len(paths_list)} indices must be present in the mapping."""
 
-    result = llm_structured(prompt, _NORMALIZE_SCHEMA, "normalize_categories")
-    mapping = {paths_list[int(i)]: new_path for i, new_path in result["mapping"].items()}
+        result = llm_structured(prompt, _NORMALIZE_SCHEMA, "normalize_categories")
+        mapping = {paths_list[int(i)]: new_path for i, new_path in result["mapping"].items()}
+
+        # Persist the mapping keyed by the path-set hash
+        serializable = {json.dumps(list(k)): v for k, v in mapping.items()}
+        consolidation_cache[paths_hash] = serializable
+        sheets_cache.write_cache(_CONSOLIDATION_CACHE_TAB, consolidation_cache)
 
     changed = 0
     for name in merchant_names:
