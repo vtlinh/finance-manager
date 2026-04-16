@@ -112,6 +112,7 @@ After pushing to GitHub, re-read this file and compact the Change Log: merge clo
 
 ### Entries
 
-- 2026-04-16: Added Change Log section to CLAUDE.md; removed render.yaml and .debug from git tracking; tightened .gitignore
-- 2026-04-16: Restructured manager/ into focused submodules (transactions/, sheets/, categorize.py, types.py); added /finalize, /structure, /test, /push, /deploy skills
-- 2026-04-16: retry_on_quota decorator on gspread writes (silent 429 retry); Summary tab title/insights shifted to column B; anomaly print on separate lines; step-transition spinner fix
+- 2026-04-16: Restructured manager/ into focused submodules; added /finalize, /structure, /test, /push, /deploy skills; tightened .gitignore; retry_on_quota on gspread writes; Summary tab title shifted to column B
+- 2026-04-16: Run page: back button always returns to Spreadsheet; Stop/Retry/Open Spreadsheet buttons; step-3 checkmark on done
+- 2026-04-16: Batch all year-summary LLM prompts in one call; hide cache tabs instead of deleting; remove MONARCH_EMAIL/PASSWORD/SPREADSHEET_ID from docs; track CLAUDE.md/.claude/ in git
+- 2026-04-16: Fix Monarch 429 login errors by replacing asyncio.run() with persistent background event loop (run_async); add show/hide password toggle; send MFA upfront via login endpoint
