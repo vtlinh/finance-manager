@@ -45,6 +45,17 @@ _NORMALIZE_SCHEMA = {
 _CACHE_TAB = "_merchant_cache"
 _CONSOLIDATION_CACHE_TAB = "_consolidation_cache"
 
+# Monarch category values that carry no real information and should be ignored
+_JUNK_CATEGORIES: frozenset[str] = frozenset({
+    "", "unknown", "uncategorized", "other", "others",
+    "no category", "none", "misc", "miscellaneous",
+})
+
+
+def _is_junk_category(category: str) -> bool:
+    return category.strip().lower() in _JUNK_CATEGORIES
+
+
 _CATEGORIZE_RULES = """Rules for the path array:
 - Use 2 levels for clear-cut merchants (e.g. ["Utilities", "Internet"]).
 - Use 3 levels where meaningful specificity exists (e.g. ["Food & Drink", "Restaurants", "Fast Food"]).
@@ -65,7 +76,7 @@ def categorize_with_llm(groups: list[dict]) -> list[dict]:
     to_be_cached = {g["name"] for g in groups if g["name"] not in cache}
 
     if to_be_cached:
-        print(f"Sending {len(to_be_cached)} merchant(s) to LLM for categorization... ({len(cache)} cached)")
+        print(f"Processing {len(to_be_cached)} new merchant(s)... ({len(cache)} cached)")
     else:
         print(f"{len(cache)} merchants cached.")
 
@@ -78,32 +89,44 @@ def categorize_with_llm(groups: list[dict]) -> list[dict]:
                 merchants.append(g)
                 seen.add(g["name"])
 
-        # Send up to _BATCH_SIZE merchants per LLM call
-        for start in range(0, len(merchants), _BATCH_SIZE):
-            chunk = merchants[start : start + _BATCH_SIZE]
-            lines = "\n".join(
-                f"{i}: {g['name']} | ${g['amount']:.2f} ({g['count']}x) | existing: {g['category']}"
-                for i, g in enumerate(chunk)
-            )
-            prompt = (
-                "You are a personal finance assistant. "
-                "Categorize each merchant below into a hierarchical category path.\n\n"
-                + lines + "\n\n"
-                + _CATEGORIZE_RULES
-                + '\n\nReturn a "categories" object mapping each index (as a string) to its path array.'
-            )
-            result = llm_structured(prompt, _CATEGORIZE_BATCH_SCHEMA, "categorize_merchants")
-            for idx_str, path in result.get("categories", {}).items():
-                if idx_str.isdigit() and int(idx_str) < len(chunk):
-                    cache[chunk[int(idx_str)]["name"]] = {"path": path}
-
-        # Fill any index the model skipped
+        # Adopt non-junk Monarch categories directly; only send the rest to LLM
+        adopted = 0
         for g in merchants:
-            if g["name"] not in cache:
-                cache[g["name"]] = {"path": ["Uncategorized"]}
+            if not _is_junk_category(g["category"]):
+                cache[g["name"]] = {"path": [g["category"]]}
+                adopted += 1
+        if adopted:
+            print(f"Adopted Monarch category for {adopted} merchant(s).")
+
+        merchants_for_llm = [g for g in merchants if g["name"] not in cache]
+        if merchants_for_llm:
+            print(f"Sending {len(merchants_for_llm)} merchant(s) to LLM for categorization...")
+            # Send up to _BATCH_SIZE merchants per LLM call
+            for start in range(0, len(merchants_for_llm), _BATCH_SIZE):
+                chunk = merchants_for_llm[start : start + _BATCH_SIZE]
+                lines = "\n".join(
+                    f"{i}: {g['name']} | ${g['amount']:.2f} ({g['count']}x) | existing: {g['category']}"
+                    for i, g in enumerate(chunk)
+                )
+                prompt = (
+                    "You are a personal finance assistant. "
+                    "Categorize each merchant below into a hierarchical category path.\n\n"
+                    + lines + "\n\n"
+                    + _CATEGORIZE_RULES
+                    + '\n\nReturn a "categories" object mapping each index (as a string) to its path array.'
+                )
+                result = llm_structured(prompt, _CATEGORIZE_BATCH_SCHEMA, "categorize_merchants")
+                for idx_str, path in result.get("categories", {}).items():
+                    if idx_str.isdigit() and int(idx_str) < len(chunk):
+                        cache[chunk[int(idx_str)]["name"]] = {"path": path}
+
+            # Fill any index the model skipped
+            for g in merchants_for_llm:
+                if g["name"] not in cache:
+                    cache[g["name"]] = {"path": ["Uncategorized"]}
 
         _save_cache(cache)
-        print(f"Classified {len(to_be_cached)} new merchants.")
+        print(f"Classified {len(to_be_cached)} new merchants ({adopted} from Monarch, {len(merchants_for_llm)} via LLM).")
 
     merchant_names = {g["name"] for g in groups}
     _collapse_single_child_categories(cache, merchant_names)

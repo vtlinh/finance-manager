@@ -1,10 +1,147 @@
-"""Tests for manager/categorize.py — consolidation caching in _normalize_categories."""
+"""Tests for manager/categorize.py — Monarch category adoption and consolidation caching."""
 import json
 from unittest.mock import call, patch
 
 import pytest
 
-from manager.categorize import _normalize_categories
+from manager.categorize import _is_junk_category, _normalize_categories, categorize_with_llm
+
+
+# ── _is_junk_category ─────────────────────────────────────────────────────────
+
+def test_is_junk_category_empty_string():
+    assert _is_junk_category("") is True
+
+def test_is_junk_category_unknown():
+    assert _is_junk_category("Unknown") is True
+
+def test_is_junk_category_case_insensitive():
+    assert _is_junk_category("UNCATEGORIZED") is True
+    assert _is_junk_category("Other") is True
+    assert _is_junk_category("MISC") is True
+
+def test_is_junk_category_whitespace_stripped():
+    assert _is_junk_category("  unknown  ") is True
+
+def test_is_junk_category_real_value_is_not_junk():
+    assert _is_junk_category("Groceries") is False
+    assert _is_junk_category("Fast Food") is False
+    assert _is_junk_category("Streaming") is False
+    assert _is_junk_category("Coffee Shops") is False
+
+
+# ── categorize_with_llm: Monarch adoption ─────────────────────────────────────
+
+def _group(name: str, category: str, month: str = "2024-01") -> dict:
+    return {"month": month, "name": name, "amount": -100.0, "count": 1, "category": category}
+
+
+def test_categorize_adopts_non_junk_monarch_category():
+    """A merchant with a real Monarch category gets that path without LLM."""
+    groups = [_group("Whole Foods", "Groceries")]
+
+    with patch("manager.categorize.sheets_cache.read_cache", return_value={}), \
+         patch("manager.categorize.sheets_cache.write_cache"), \
+         patch("manager.categorize.llm_structured") as mock_llm:
+        result = categorize_with_llm(groups)
+
+    mock_llm.assert_not_called()
+    # Single-element path — not affected by collapse
+    assert result[0]["path"] == ["Groceries"]
+
+
+def test_categorize_sends_junk_category_to_llm():
+    """A merchant with a junk Monarch category must go through the LLM."""
+    groups = [_group("Mystery Store", "Unknown")]
+    # Use a single-element path so _collapse_single_child_categories doesn't change it
+    llm_response = {"categories": {"0": ["Shopping"]}}
+
+    with patch("manager.categorize.sheets_cache.read_cache", return_value={}), \
+         patch("manager.categorize.sheets_cache.write_cache"), \
+         patch("manager.categorize.llm_structured", return_value=llm_response) as mock_llm:
+        result = categorize_with_llm(groups)
+
+    mock_llm.assert_called_once()
+    assert result[0]["path"] == ["Shopping"]
+
+
+def test_categorize_sends_empty_category_to_llm():
+    """Empty string category is junk and should trigger LLM."""
+    groups = [_group("Mystery Store", "")]
+    llm_response = {"categories": {"0": ["Uncategorized"]}}
+
+    with patch("manager.categorize.sheets_cache.read_cache", return_value={}), \
+         patch("manager.categorize.sheets_cache.write_cache"), \
+         patch("manager.categorize.llm_structured", return_value=llm_response):
+        result = categorize_with_llm(groups)
+
+    assert result[0]["path"] == ["Uncategorized"]
+
+
+def test_categorize_mixed_good_and_junk_categories():
+    """Good-category merchants are adopted; junk-category merchants go to LLM."""
+    groups = [
+        _group("Whole Foods", "Groceries"),
+        _group("Mystery Store", "Unknown"),
+    ]
+    # Single-element path avoids collapse side-effects in assertions
+    llm_response = {"categories": {"0": ["Shopping"]}}
+
+    with patch("manager.categorize.sheets_cache.read_cache", return_value={}), \
+         patch("manager.categorize.sheets_cache.write_cache"), \
+         patch("manager.categorize.llm_structured", return_value=llm_response) as mock_llm:
+        result = categorize_with_llm(groups)
+
+    mock_llm.assert_called_once()
+    by_name = {r["name"]: r["path"] for r in result}
+    assert by_name["Whole Foods"] == ["Groceries"]
+    assert by_name["Mystery Store"] == ["Shopping"]
+
+
+def test_categorize_already_cached_merchant_not_re_adopted():
+    """A merchant already in cache is never overwritten, even if Monarch category changed."""
+    # Use single-element cached path to avoid collapse side-effects
+    cached = {"Whole Foods": {"path": ["Groceries"]}}
+    groups = [_group("Whole Foods", "Snacks")]  # different Monarch category
+
+    with patch("manager.categorize.sheets_cache.read_cache", return_value=cached), \
+         patch("manager.categorize.sheets_cache.write_cache"), \
+         patch("manager.categorize.llm_structured") as mock_llm:
+        result = categorize_with_llm(groups)
+
+    mock_llm.assert_not_called()
+    assert result[0]["path"] == ["Groceries"]
+
+
+def test_categorize_all_junk_no_adoption_message(capsys):
+    """When all merchants have junk categories, no 'Adopted' message is printed."""
+    groups = [_group("Store A", "Other"), _group("Store B", "")]
+    llm_response = {"categories": {"0": ["Shopping"], "1": ["Utilities"]}}
+
+    with patch("manager.categorize.sheets_cache.read_cache", return_value={}), \
+         patch("manager.categorize.sheets_cache.write_cache"), \
+         patch("manager.categorize.llm_structured", return_value=llm_response):
+        categorize_with_llm(groups)
+
+    out = capsys.readouterr().out
+    assert "Adopted" not in out
+
+
+def test_categorize_all_good_no_llm_call(capsys):
+    """When all merchants have real categories, no LLM call is made."""
+    groups = [
+        _group("Whole Foods", "Groceries"),
+        _group("Netflix", "Streaming"),
+    ]
+
+    with patch("manager.categorize.sheets_cache.read_cache", return_value={}), \
+         patch("manager.categorize.sheets_cache.write_cache"), \
+         patch("manager.categorize.llm_structured") as mock_llm:
+        categorize_with_llm(groups)
+
+    mock_llm.assert_not_called()
+    out = capsys.readouterr().out
+    assert "Adopted" in out
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────

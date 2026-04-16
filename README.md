@@ -103,7 +103,7 @@ The script will:
 
 1. Fetch all transactions from Monarch Money (or read from an offline CSV)
 2. Remove transfer pairs (e.g. credit card payments)
-3. Categorize merchants using Claude AI in batches of up to 1000 per call
+3. Categorize merchants: use existing Monarch category if meaningful, otherwise ask Claude AI (batches of up to 1000)
 4. Consolidate categories if there are more than 100 unique paths or 15 root categories
 5. Detect spending anomalies month-over-month using Claude AI
 6. Export per-year **Spending** and **Summary** tabs to your Google Sheet
