@@ -53,6 +53,31 @@ app.config["SESSION_COOKIE_HTTPONLY"] = True
 _run_proc: subprocess.Popen | None = None
 _run_stopped: bool = False
 
+# ── Persistent async event loop ────────────────────────────────────────────────
+# asyncio.run() creates+destroys an event loop per call, which abruptly closes
+# TCP connections and triggers 429s from the Monarch API. Instead we keep one
+# loop alive for the lifetime of the process — exactly like the asyncio REPL.
+
+_async_loop: asyncio.AbstractEventLoop | None = None
+_async_loop_lock = threading.Lock()
+
+
+def _get_async_loop() -> asyncio.AbstractEventLoop:
+    global _async_loop
+    with _async_loop_lock:
+        if _async_loop is None or not _async_loop.is_running():
+            loop = asyncio.new_event_loop()
+            t = threading.Thread(target=loop.run_forever, daemon=True, name="async-loop")
+            t.start()
+            _async_loop = loop
+    return _async_loop
+
+
+def run_async(coro):
+    """Submit a coroutine to the persistent event loop and block until done."""
+    future = asyncio.run_coroutine_threadsafe(coro, _get_async_loop())
+    return future.result()
+
 
 # ── Fernet encryption for sensitive session cookie values ──────────────────────
 
@@ -183,20 +208,28 @@ def monarch_login():
     data = request.json
     email    = (data.get("email") or "").strip()
     password = (data.get("password") or "").strip()
+    mfa      = (data.get("mfa") or "").strip() or None
     if not email or not password:
         return jsonify({"status": "error", "message": "Email and password are required."})
 
     async def _try():
         mm = MonarchMoney()
+        if mfa:
+            # MFA code provided upfront — skip login() and authenticate directly
+            try:
+                await mm.multi_factor_authenticate(email, password, mfa)
+                return {"status": "ok", "mm": mm}
+            except Exception as exc:
+                return {"status": "error", "message": str(exc)}
         try:
-            await mm.login(email, password)
+            await mm.login(email, password, use_saved_session=False, save_session=False)
             return {"status": "ok", "mm": mm}
         except RequireMFAException:
             return {"status": "mfa_required", "mm": mm}
         except Exception as exc:
             return {"status": "error", "message": str(exc)}
 
-    result = asyncio.run(_try())
+    result = run_async(_try())
     mm = result.pop("mm", None)
 
     if result["status"] == "ok" and mm:
@@ -204,7 +237,6 @@ def monarch_login():
         session["monarch_email"] = email
 
     if result["status"] == "mfa_required":
-        # Store MFA credentials in encrypted cookie — never touches disk
         session["monarch_mfa_email"] = email
         session["monarch_mfa_password"] = _enc(password)
 
@@ -215,7 +247,7 @@ def monarch_login():
 def monarch_mfa():
     from monarchmoney import MonarchMoney  # type: ignore
 
-    code     = (request.json.get("code") or "").strip()
+    code     = (request.json.get("code") or "").strip() or None
     email    = session.get("monarch_mfa_email")
     password = _dec(session.get("monarch_mfa_password", ""))
 
@@ -230,7 +262,7 @@ def monarch_mfa():
         except Exception as exc:
             return {"status": "error", "message": str(exc)}
 
-    result = asyncio.run(_submit())
+    result = run_async(_submit())
     mm = result.pop("mm", None)
 
     if result["status"] == "ok" and mm:
@@ -268,7 +300,7 @@ def monarch_validate():
             except OSError:
                 pass
 
-    result = asyncio.run(_test())
+    result = run_async(_test())
     if result["status"] != "ok":
         session.pop("monarch_session", None)
         session.pop("monarch_email", None)

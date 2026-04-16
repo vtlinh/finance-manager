@@ -130,6 +130,15 @@
     .field { margin-bottom: 1rem; }
     label  { display: block; font-size: .83rem; font-weight: 600; margin-bottom: .35rem; }
 
+    .input-wrap { position: relative; }
+    .input-wrap input { padding-right: 2.4rem; }
+    .toggle-pw {
+      position: absolute; right: .6rem; top: 50%; transform: translateY(-50%);
+      background: none; border: none; cursor: pointer; padding: .2rem;
+      color: var(--muted); line-height: 1; font-size: 1rem;
+    }
+    .toggle-pw:hover { color: var(--text); }
+
     input[type="text"],
     input[type="email"],
     input[type="password"] {
@@ -429,7 +438,10 @@ function renderMonarch() {
           </div>
           <div class="field">
             <label>Password</label>
-            <input type="password" id="mm-password" placeholder="Your Monarch password">
+            <div class="input-wrap">
+              <input type="password" id="mm-password" placeholder="Your Monarch password">
+              <button type="button" class="toggle-pw" onclick="togglePassword('mm-password', this)" tabindex="-1" aria-label="Show password">👁</button>
+            </div>
           </div>
           <div class="field">
             <label>Two-Factor Code
@@ -547,28 +559,14 @@ async function submitMonarch() {
   setBtn("mm-btn", true, "Connecting…");
   hide("mm-alert");
 
-  const res = await post("/api/monarch/login", { email, password });
+  const res = await post("/api/monarch/login", { email, password, mfa });
   if (res.status === "ok") {
     status.monarch_email = email;
     await transitionToSpreadsheet();
   } else if (res.status === "mfa_required") {
-    if (mfa) {
-      // Code was pre-filled — submit it automatically
-      const mfaRes = await post("/api/monarch/mfa", { code: mfa });
-      if (mfaRes.status === "ok") {
-        status.monarch_email = email;
-        await transitionToSpreadsheet();
-      } else {
-        setBtn("mm-btn", false, "Verify &amp; Next →");
-        document.getElementById("mm-mfa").value = "";
-        show("mm-alert", mfaRes.message || "Invalid two-factor code.", "error");
-        document.getElementById("mm-mfa").focus();
-      }
-    } else {
-      setBtn("mm-btn", false, "Verify &amp; Next →");
-      show("mm-alert", "Two-factor authentication required — enter your code above.", "info");
-      document.getElementById("mm-mfa").focus();
-    }
+    setBtn("mm-btn", false, "Verify &amp; Next →");
+    show("mm-alert", "Two-factor authentication required — enter your code above.", "info");
+    document.getElementById("mm-mfa").focus();
   } else {
     setBtn("mm-btn", false, "Verify &amp; Next →");
     show("mm-alert", res.message || "Login failed.", "error");
@@ -786,6 +784,14 @@ function renderRun() {
 function onRunAuthDone() {
   document.getElementById("run-area").style.display = "";
   runScript();
+}
+
+function togglePassword(id, btn) {
+  const inp = document.getElementById(id);
+  const show = inp.type === "password";
+  inp.type = show ? "text" : "password";
+  btn.textContent = show ? "🙈" : "👁";
+  btn.setAttribute("aria-label", show ? "Hide password" : "Show password");
 }
 
 function stopScript() {

@@ -4,7 +4,7 @@ import gspread
 
 from ..login import Google
 from .spending import write_spending_sheet
-from .summary import _generate_summary_insights, write_summary_sheet
+from .summary import generate_all_summary_insights, write_summary_sheet
 
 
 def export(categorized: list[dict], anomalies: dict) -> None:
@@ -23,24 +23,30 @@ def export(categorized: list[dict], anomalies: dict) -> None:
         except gspread.WorksheetNotFound:
             return sh.add_worksheet(title=title, rows=500, cols=30)
 
-    # Write expected tabs first so there is always at least one tab before any deletions
-    for year in years:
-        year_groups = [g for g in categorized if g["month"].startswith(year)]
-        prev_year_groups = [g for g in categorized if g["month"].startswith(str(int(year) - 1))]
+    # Generate all year summaries in a single batch LLM call
+    years_data = [
+        (year,
+         [g for g in categorized if g["month"].startswith(year)],
+         [g for g in categorized if g["month"].startswith(str(int(year) - 1))])
+        for year in years
+    ]
+    all_insights = generate_all_summary_insights(years_data)
 
+    # Write expected tabs first so there is always at least one tab before any deletions
+    for year, year_groups, prev_year_groups in years_data:
         print(f"Writing Spending {year}...")
         write_spending_sheet(get_or_create(f"Spending {year}"), year_groups, anomalies)
 
-        print(f"Generating summary for {year}...", end=" ", flush=True)
-        insights = _generate_summary_insights(year_groups, prev_year_groups, year)
-        print("done")
-
         print(f"Writing Summary {year}...")
-        write_summary_sheet(get_or_create(f"Summary {year}"), year_groups, prev_year_groups, anomalies, year, insights)
+        write_summary_sheet(get_or_create(f"Summary {year}"), year_groups, prev_year_groups, anomalies, year, all_insights[year])
 
-    # Now safe to remove stale tabs — expected tabs already exist
+    # Now safe to clean up stale tabs — expected tabs already exist
     for ws in sh.worksheets():
-        if ws.title not in expected:
+        if ws.title in expected:
+            continue
+        if ws.title.startswith("_"):
+            ws.hide()  # cache tabs — keep but ensure hidden
+        else:
             print(f"Removing old tab: {ws.title}")
             sh.del_worksheet(ws)
 

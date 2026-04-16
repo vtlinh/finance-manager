@@ -305,9 +305,8 @@ def test_google_callback_missing_state(client):
 
 def test_api_run_streams_sse(client, tmp_path):
     """api/run should return an SSE stream with at least one data event."""
-    import subprocess
     mock_proc = MagicMock()
-    mock_proc.stdout = iter(["All done\n"])
+    mock_proc.stdout = io.StringIO("All done\n")
     mock_proc.returncode = 0
     mock_proc.wait = MagicMock()
     with patch("subprocess.Popen", return_value=mock_proc):
@@ -364,7 +363,7 @@ def test_api_stop_ignores_already_finished_process(client):
 def test_api_run_emits_stopped_event_when_terminated(client):
     """When _run_stopped is set, api/run SSE stream emits a 'stopped' event."""
     mock_proc = MagicMock()
-    mock_proc.stdout = iter([])
+    mock_proc.stdout = io.StringIO("")  # empty but has readline()
     mock_proc.returncode = 1
     mock_proc.wait = MagicMock()
 
@@ -378,3 +377,26 @@ def test_api_run_emits_stopped_event_when_terminated(client):
 
     assert "stopped" in data
     assert "done" not in data
+
+
+# ── Persistent async event loop ────────────────────────────────────────────────
+
+def test_run_async_reuses_same_loop():
+    """run_async should use a single persistent loop, not create a new one per call."""
+    import asyncio as _asyncio
+
+    async def get_loop():
+        return _asyncio.get_running_loop()
+
+    loop1 = server.run_async(get_loop())
+    loop2 = server.run_async(get_loop())
+    assert loop1 is loop2, "run_async must reuse the same event loop across calls"
+
+
+def test_run_async_loop_survives_multiple_calls():
+    """run_async should remain functional after multiple consecutive calls."""
+    async def add(a, b):
+        return a + b
+
+    results = [server.run_async(add(i, i)) for i in range(5)]
+    assert results == [0, 2, 4, 6, 8]

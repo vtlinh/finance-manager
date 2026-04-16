@@ -2,7 +2,7 @@ from collections import defaultdict
 
 import gspread
 
-from ..llm import llm_structured
+from ..llm import llm_batch_structured
 from .helpers import _month_label, retry_on_quota
 
 _SUMMARY_SCHEMA = {
@@ -18,12 +18,12 @@ _SUMMARY_SCHEMA = {
 }
 
 
-def _generate_summary_insights(
+def _build_summary_prompt(
     year_groups: list[dict],
     prev_year_groups: list[dict],
     year: str,
-) -> list[str]:
-    """Ask the LLM for notable year-over-year spending insights."""
+) -> str:
+    """Build the LLM prompt for a single year's spending insights."""
 
     def top_totals(groups: list[dict]) -> dict[str, float]:
         totals: dict[str, float] = defaultdict(float)
@@ -63,7 +63,7 @@ def _generate_summary_insights(
     table = "\n".join(lines)
     has_prev = bool(prev)
 
-    prompt = f"""You are a personal finance analyst reviewing annual spending.
+    return f"""You are a personal finance analyst reviewing annual spending.
 
 {'Year-over-year comparison:' if has_prev else f'Spending summary for {year}:'}
 
@@ -75,8 +75,25 @@ Be concise and specific — include dollar figures and percentages.
 Skip obvious or trivial observations.
 Return 4–7 insights sorted by financial impact (largest first)."""
 
-    result = llm_structured(prompt, _SUMMARY_SCHEMA, "report_summary")
-    return result.get("insights", [])
+
+def generate_all_summary_insights(
+    years_data: list[tuple[str, list[dict], list[dict]]],
+) -> dict[str, list[str]]:
+    """Generate insights for all years in a single batch LLM call.
+
+    Args:
+        years_data: List of (year, year_groups, prev_year_groups) tuples.
+
+    Returns:
+        Dict mapping year -> list of insight strings.
+    """
+    print(f"Generating summaries for {len(years_data)} year(s)...", flush=True)
+    prompts = [
+        (year, _build_summary_prompt(year_groups, prev_year_groups, year))
+        for year, year_groups, prev_year_groups in years_data
+    ]
+    results = llm_batch_structured(prompts, _SUMMARY_SCHEMA, "report_summary")
+    return {year: results.get(year, {}).get("insights", []) for year, _, _ in years_data}
 
 
 @retry_on_quota
