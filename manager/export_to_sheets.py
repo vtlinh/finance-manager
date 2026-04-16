@@ -243,18 +243,94 @@ def write_spending_sheet(ws: gspread.Worksheet, groups: list[dict], anomaly_cach
     ws.spreadsheet.batch_update({"requests": note_requests})
 
 
-def write_anomalies_sheet(ws: gspread.Worksheet, anomaly_cache: dict, months: list[str]) -> None:
-    rows = [["Month", "Anomaly"]]
-    for m in months:
-        for i, note in enumerate(anomaly_cache.get(m, [])):
-            rows.append([_month_label(m) if i == 0 else "", note])
+def write_summary_sheet(
+    ws: gspread.Worksheet,
+    year_groups: list[dict],
+    prev_year_groups: list[dict],
+    anomaly_cache: dict,
+    year: str,
+) -> None:
+    """Write a summary tab: year-over-year totals by top-level category, then anomalies."""
 
-    if len(rows) == 1:
+    def top_totals(groups: list[dict]) -> dict[str, float]:
+        totals: dict[str, float] = defaultdict(float)
+        for g in groups:
+            top = g.get("path", ["Uncategorized"])[0]
+            totals[top] += g["amount"]
+        return totals
+
+    curr = top_totals(year_groups)
+    prev = top_totals(prev_year_groups)
+    has_prev = bool(prev_year_groups)
+    prev_year = str(int(year) - 1)
+
+    all_cats = sorted(set(curr) | set(prev))
+
+    # ── Year summary table ────────────────────────────────────────────────────
+    if has_prev:
+        header = ["Category", prev_year, year, "Change ($)", "Change (%)"]
+    else:
+        header = ["Category", year]
+
+    rows: list[list] = [header]
+
+    for cat in all_cats:
+        c = round(-curr.get(cat, 0.0), 2)
+        p = round(-prev.get(cat, 0.0), 2) if has_prev else None
+        if has_prev:
+            chg = round(c - p, 2)
+            pct = round((c - p) / p * 100, 1) if p else ""
+            rows.append([cat, p or "", c or "", chg or "", pct])
+        else:
+            rows.append([cat, c or ""])
+
+    # Total row
+    c_total = round(-sum(curr.values()), 2)
+    if has_prev:
+        p_total = round(-sum(prev.values()), 2)
+        chg = round(c_total - p_total, 2)
+        pct = round((c_total - p_total) / p_total * 100, 1) if p_total else ""
+        rows.append(["Total", p_total, c_total, chg, pct])
+    else:
+        rows.append(["Total", c_total])
+
+    n_summary_rows = len(rows)  # used for formatting below
+
+    # ── Anomalies section ─────────────────────────────────────────────────────
+    year_months = sorted({g["month"] for g in year_groups})
+    noted = [(m, anomaly_cache.get(m, [])) for m in year_months if anomaly_cache.get(m)]
+
+    rows.append([""])  # blank separator
+    rows.append(["Spending Anomalies"])
+    rows.append(["Month", "Anomaly"])
+    if noted:
+        for m, notes in noted:
+            for i, note in enumerate(notes):
+                rows.append([_month_label(m, include_year=False) if i == 0 else "", note])
+    else:
         rows.append(["", "No anomalies detected."])
 
+    # ── Write & format ────────────────────────────────────────────────────────
     ws.clear()
     ws.update(rows, value_input_option="USER_ENTERED")
-    ws.format("A1:B1", {"textFormat": {"bold": True}})
+
+    n_cols = len(header)
+    last_col_letter = chr(ord("A") + n_cols - 1)
+
+    # Bold header and total row
+    ws.format(f"A1:{last_col_letter}1", {"textFormat": {"bold": True}})
+    ws.format(f"A{n_summary_rows}:{last_col_letter}{n_summary_rows}", {"textFormat": {"bold": True}})
+
+    # Bold anomaly section header
+    anomaly_header_row = n_summary_rows + 3
+    ws.format(f"A{anomaly_header_row}:B{anomaly_header_row}", {"textFormat": {"bold": True}})
+
+    # Currency format for numeric columns (skip category column A)
+    if n_cols > 1:
+        num_range = f"B2:{last_col_letter}{n_summary_rows}"
+        ws.format(num_range, {"numberFormat": {"type": "CURRENCY", "pattern": "$#,##0.00"}})
+
+    ws.freeze(rows=1, cols=1)
 
 
 # ── Public API ─────────────────────────────────────────────────────────────────
@@ -267,10 +343,7 @@ def export(categorized: list[dict], anomalies: dict) -> None:
     gc = gspread.authorize(creds)
     sh = gc.open_by_key(spreadsheet_id)
 
-    def year_has_anomalies(year: str) -> bool:
-        return any(anomalies.get(m) for m in anomalies if m.startswith(year))
-
-    expected = {f"Spending {y}" for y in years} | {f"Anomalies {y}" for y in years if year_has_anomalies(y)}
+    expected = {f"Spending {y}" for y in years} | {f"Summary {y}" for y in years}
 
     def get_or_create(title: str) -> gspread.Worksheet:
         try:
@@ -281,14 +354,13 @@ def export(categorized: list[dict], anomalies: dict) -> None:
     # Write expected tabs first so there is always at least one tab before any deletions
     for year in years:
         year_groups = [g for g in categorized if g["month"].startswith(year)]
-        year_months = sorted({g["month"] for g in year_groups})
+        prev_year_groups = [g for g in categorized if g["month"].startswith(str(int(year) - 1))]
 
         print(f"Writing Spending {year}...")
         write_spending_sheet(get_or_create(f"Spending {year}"), year_groups, anomalies)
 
-        if year_has_anomalies(year):
-            print(f"Writing Anomalies {year}...")
-            write_anomalies_sheet(get_or_create(f"Anomalies {year}"), anomalies, year_months)
+        print(f"Writing Summary {year}...")
+        write_summary_sheet(get_or_create(f"Summary {year}"), year_groups, prev_year_groups, anomalies, year)
 
     # Now safe to remove stale tabs — expected tabs already exist
     for ws in sh.worksheets():
@@ -296,8 +368,8 @@ def export(categorized: list[dict], anomalies: dict) -> None:
             print(f"Removing old tab: {ws.title}")
             sh.del_worksheet(ws)
 
-    # Reorder tabs chronologically: Spending {year}, Anomalies {year} for each year
-    desired_order = [title for year in years for title in ([f"Spending {year}", f"Anomalies {year}"] if year_has_anomalies(year) else [f"Spending {year}"])]
+    # Reorder tabs chronologically: Spending {year}, Summary {year} for each year
+    desired_order = [title for year in years for title in [f"Spending {year}", f"Summary {year}"]]
     worksheets_by_title = {ws.title: ws for ws in sh.worksheets()}
     sh.reorder_worksheets([worksheets_by_title[t] for t in desired_order if t in worksheets_by_title])
 
