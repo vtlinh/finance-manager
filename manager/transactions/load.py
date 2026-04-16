@@ -3,7 +3,7 @@ import os
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
-from .login import Monarch
+from ..login import Monarch
 
 _DIR = Path(__file__).parent
 MONARCH_LIMIT = 100000

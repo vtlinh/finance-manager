@@ -1,6 +1,5 @@
 import json
 from collections import defaultdict
-from datetime import datetime, timedelta
 
 from .llm import llm_structured
 from . import sheets_cache
@@ -44,6 +43,12 @@ _NORMALIZE_SCHEMA = {
 
 _CACHE_TAB = "_merchant_cache"
 
+_CATEGORIZE_RULES = """Rules for the path array:
+- Use 2 levels for clear-cut merchants (e.g. ["Utilities", "Internet"]).
+- Use 3 levels where meaningful specificity exists (e.g. ["Food & Drink", "Restaurants", "Fast Food"]).
+- Use 4 levels only when genuinely distinct (e.g. ["Shopping", "Clothing", "Kids", "Shoes"]).
+- Do not invent a deeper level just to fill space."""
+
 
 def _load_cache() -> dict:
     return sheets_cache.read_cache(_CACHE_TAB)
@@ -51,13 +56,6 @@ def _load_cache() -> dict:
 
 def _save_cache(cache: dict) -> None:
     sheets_cache.write_cache(_CACHE_TAB, cache)
-
-
-_CATEGORIZE_RULES = """Rules for the path array:
-- Use 2 levels for clear-cut merchants (e.g. ["Utilities", "Internet"]).
-- Use 3 levels where meaningful specificity exists (e.g. ["Food & Drink", "Restaurants", "Fast Food"]).
-- Use 4 levels only when genuinely distinct (e.g. ["Shopping", "Clothing", "Kids", "Shoes"]).
-- Do not invent a deeper level just to fill space."""
 
 
 def categorize_with_llm(groups: list[dict]) -> list[dict]:
@@ -136,7 +134,6 @@ def _collapse_single_child_categories(cache: dict, merchant_names: set[str]) -> 
         i = 0
         while i < len(path):
             segment = path[i]
-            # Keep merging while the current node has exactly one child
             while len(children[path[:i + 1]]) == 1 and i + 1 < len(path):
                 i += 1
                 segment += " > " + path[i]
@@ -200,7 +197,7 @@ All {len(paths_list)} indices must be present in the mapping."""
         old_tuple = tuple(entry["path"])
         new_path = mapping.get(old_tuple)
         if new_path is not None and new_path != entry["path"]:
-            if "old_path" not in entry:  # preserve original for debugging, never overwrite
+            if "old_path" not in entry:
                 entry["old_path"] = entry["path"]
             entry["path"] = new_path
             changed += 1
@@ -208,73 +205,3 @@ All {len(paths_list)} indices must be present in the mapping."""
     if changed:
         _save_cache(cache)
     print(f"Consolidated {changed} merchant(s) to the new taxonomy.")
-
-# ── Transaction pipeline ───────────────────────────────────────────────────────
-
-def filter_by_date(transactions: list[dict], days: int = 365) -> list[dict]:
-    """Keep only transactions within the last `days` days from today."""
-    cutoff = datetime.today() - timedelta(days=days)
-    return [
-        t for t in transactions
-        if datetime.strptime(t["date"], "%Y-%m-%d") >= cutoff
-    ]
-
-
-def group_by_month_merchant(transactions: list[dict]) -> list[dict]:
-    """Aggregate transactions by (month, merchant), summing amounts."""
-    groups: dict[tuple, dict] = defaultdict(lambda: {"amount": 0.0, "count": 0, "category": "Uncategorized"})
-
-    for t in transactions:
-        month = t["date"][:7]  # "YYYY-MM"
-        key = (month, t["name"])
-        groups[key]["amount"] += t["amount"]
-        groups[key]["count"] += 1
-        groups[key]["category"] = t["category"]
-
-    return [
-        {"month": month, "name": name, **data}
-        for (month, name), data in sorted(groups.items())
-    ]
-
-
-def filter_transactions(transactions: list[dict], days_window: int = 7, amount_tolerance: float = 0.01) -> list[dict]:
-    """Remove dust (< $0.10) and paired transfer transactions (opposite-sign, matching amount within days_window days)."""
-    transactions = [t for t in transactions if abs(t["amount"]) >= 0.1]
-    removed: set[int] = set()
-
-    for i in range(len(transactions)):
-        if i in removed:
-            continue
-        t1 = transactions[i]
-        try:
-            d1 = datetime.strptime(t1["date"], "%Y-%m-%d")
-        except ValueError:
-            continue
-
-        for j in range(i + 1, len(transactions)):
-            if j in removed:
-                continue
-            t2 = transactions[j]
-
-            if not ((t1["amount"] > 0 and t2["amount"] < 0) or (t1["amount"] < 0 and t2["amount"] > 0)):
-                continue
-            if abs(abs(t1["amount"]) - abs(t2["amount"])) > amount_tolerance:
-                continue
-
-            try:
-                d2 = datetime.strptime(t2["date"], "%Y-%m-%d")
-            except ValueError:
-                continue
-
-            if abs((d1 - d2).days) <= days_window:
-                removed.add(i)
-                removed.add(j)
-                break
-
-    if removed:
-        pairs = len(removed) // 2
-        for i in sorted(removed):
-            t = transactions[i]
-
-    return [t for i, t in enumerate(transactions) if i not in removed]
-

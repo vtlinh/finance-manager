@@ -106,7 +106,7 @@ The script will:
 3. Categorize merchants using Claude AI in batches of up to 1000 per call
 4. Consolidate categories if there are more than 100 unique paths or 15 root categories
 5. Detect spending anomalies month-over-month using Claude AI
-6. Export per-year **Spending** and **Anomalies** tabs to your Google Sheet
+6. Export per-year **Spending** and **Summary** tabs to your Google Sheet
 
 ---
 
