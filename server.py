@@ -8,7 +8,9 @@ import subprocess
 import sys
 import tempfile
 import threading
-from datetime import timedelta
+import traceback
+from collections import deque
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from cryptography.fernet import Fernet, InvalidToken
@@ -106,6 +108,41 @@ _local_oauth_result: dict = {"token_json": None, "error": None, "done": False}
 def _callback_url() -> str:
     base = os.environ.get("APP_URL", request.host_url.rstrip("/"))
     return f"{base}/api/google/callback"
+
+
+# ── Error store ────────────────────────────────────────────────────────────────
+
+_error_log: deque = deque(maxlen=50)
+# Derive a stable read key from the Flask secret so no extra env var is needed
+_ERROR_KEY = hashlib.sha256(_SECRET_KEY).hexdigest()[:24]
+
+
+def _capture_error(exc: Exception) -> None:
+    _error_log.appendleft({
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "path": request.path,
+        "method": request.method,
+        "error_type": type(exc).__name__,
+        "message": str(exc),
+        "traceback": traceback.format_exc(),
+    })
+
+
+@app.errorhandler(Exception)
+def _handle_unhandled(exc: Exception):
+    _capture_error(exc)
+    return jsonify({"error": str(exc)}), 500
+
+
+@app.route("/api/errors")
+def api_errors():
+    if request.args.get("key") != _ERROR_KEY:
+        return jsonify({"error": "Unauthorized"}), 401
+    since = request.args.get("since")
+    errors = list(_error_log)
+    if since:
+        errors = [e for e in errors if e["timestamp"] > since]
+    return jsonify({"key": _ERROR_KEY, "errors": errors, "endpoint": request.host_url.rstrip("/") + "/api/errors"})
 
 
 @app.before_request
