@@ -408,7 +408,11 @@ def google_callback():
         redirect_uri=_callback_url(),
     )
     auth_response = request.url.replace("http://", "https://", 1)
-    flow.fetch_token(authorization_response=auth_response)
+    try:
+        flow.fetch_token(authorization_response=auth_response)
+    except Exception as e:
+        import traceback
+        return f"<pre>OAuth error:\n{traceback.format_exc()}\n\nrequest.url={request.url!r}\nauth_response={auth_response!r}\nstate={state!r}\ncallback_url={_callback_url()!r}</pre>", 500
     creds = flow.credentials
     session["google_token"] = _enc(creds.to_json())
     session.pop("google_oauth_state", None)
