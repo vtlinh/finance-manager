@@ -84,6 +84,7 @@ def write_cache(tab_name: str, data: dict) -> None:
         ws = next((w for w in sh.worksheets() if w.title == tab_name), None)
         if ws is None:
             ws = sh.add_worksheet(title=tab_name, rows=max(len(rows), 1), cols=2)
+            ws.hide()
         else:
             ws.clear()
 
