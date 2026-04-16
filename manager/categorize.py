@@ -202,10 +202,18 @@ def _normalize_categories(cache: dict, merchant_names: set[str]) -> None:
     ).hexdigest()[:16]
 
     consolidation_cache = sheets_cache.read_cache(_CONSOLIDATION_CACHE_TAB)
-    cached_mapping_raw = consolidation_cache.get(paths_hash)
-    if cached_mapping_raw is not None:
-        # Cached mapping is stored as {json_str_of_path: new_path_list}
-        mapping = {tuple(json.loads(k)): v for k, v in cached_mapping_raw.items()}
+    cached_raw = consolidation_cache.get(paths_hash)
+    if cached_raw is not None:
+        # Stored as one row per pair: [orig_path, new_path].
+        # read_cache unwraps single-item lists, so a 1-entry mapping comes back as
+        # [orig, new] while a multi-entry mapping comes back as [[orig1,new1], ...].
+        # Disambiguate: in the multi-entry case cached_raw[0][0] is a list (orig_path);
+        # in the single-entry case cached_raw[0][0] is a string (first path element).
+        if cached_raw and isinstance(cached_raw[0], list) and isinstance(cached_raw[0][0], list):
+            pairs = cached_raw          # [[orig1, new1], [orig2, new2], ...]
+        else:
+            pairs = [cached_raw]        # single entry unwrapped to [orig, new]
+        mapping = {tuple(pair[0]): pair[1] for pair in pairs}
         print(f"Applying cached consolidation mapping ({len(mapping)} paths).")
     else:
         print(
@@ -226,9 +234,8 @@ All {len(paths_list)} indices must be present in the mapping."""
         result = llm_structured(prompt, _NORMALIZE_SCHEMA, "normalize_categories")
         mapping = {paths_list[int(i)]: new_path for i, new_path in result["mapping"].items()}
 
-        # Persist the mapping keyed by the path-set hash
-        serializable = {json.dumps(list(k)): v for k, v in mapping.items()}
-        consolidation_cache[paths_hash] = serializable
+        # Persist as a list of [orig_path, new_path] pairs — one row per entry in Sheets
+        consolidation_cache[paths_hash] = [[list(k), v] for k, v in mapping.items()]
         sheets_cache.write_cache(_CONSOLIDATION_CACHE_TAB, consolidation_cache)
 
     changed = 0

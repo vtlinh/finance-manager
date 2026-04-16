@@ -229,11 +229,13 @@ def test_normalize_stores_mapping_in_consolidation_cache():
         _normalize_categories(cache, names)
 
     assert "_consolidation_cache" in written
-    # Stored entry should be a dict keyed by json-encoded path strings
     stored = written["_consolidation_cache"]
     assert len(stored) == 1  # one hash entry
-    mapping_blob = next(iter(stored.values()))
-    assert isinstance(mapping_blob, dict)
+    # Value must be a list of [orig_path, new_path] pairs — one per row in Sheets
+    pairs = next(iter(stored.values()))
+    assert isinstance(pairs, list)
+    assert len(pairs) == len(roots)           # one pair per path
+    assert all(isinstance(p, list) and len(p) == 2 for p in pairs)
 
 
 def test_normalize_applies_llm_mapping_to_merchant_cache():
@@ -295,9 +297,9 @@ def test_normalize_skips_llm_on_cache_hit():
         json.dumps([list(p) for p in paths_list]).encode()
     ).hexdigest()[:16]
 
-    # Pre-populate consolidation cache with a mapping for this hash
-    cached_mapping = {json.dumps(list(p)): ["Cached"] for p in paths_list}
-    consolidation_cache = {paths_hash: cached_mapping}
+    # Pre-populate consolidation cache: list of [orig_path, new_path] pairs
+    # (mirrors what read_cache returns after the new row-per-pair storage format)
+    consolidation_cache = {paths_hash: [[list(p), ["Cached"]] for p in paths_list]}
 
     with patch("manager.categorize.sheets_cache.read_cache", return_value=consolidation_cache), \
          patch("manager.categorize.sheets_cache.write_cache"), \
@@ -319,8 +321,7 @@ def test_normalize_applies_cached_mapping_correctly():
     ).hexdigest()[:16]
 
     new_path = ["Cached", "Path"]
-    cached_mapping = {json.dumps(list(p)): new_path for p in paths_list}
-    consolidation_cache = {paths_hash: cached_mapping}
+    consolidation_cache = {paths_hash: [[list(p), new_path] for p in paths_list]}
 
     with patch("manager.categorize.sheets_cache.read_cache", return_value=consolidation_cache), \
          patch("manager.categorize.sheets_cache.write_cache"), \
@@ -342,8 +343,7 @@ def test_normalize_does_not_write_consolidation_cache_on_hit():
         json.dumps([list(p) for p in paths_list]).encode()
     ).hexdigest()[:16]
 
-    cached_mapping = {json.dumps(list(p)): ["Cached"] for p in paths_list}
-    consolidation_cache = {paths_hash: cached_mapping}
+    consolidation_cache = {paths_hash: [[list(p), ["Cached"]] for p in paths_list]}
     write_calls: list = []
 
     def fake_write(tab, data):

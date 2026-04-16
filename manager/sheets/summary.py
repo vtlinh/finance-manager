@@ -162,6 +162,7 @@ def write_summary_sheet(
         rows.append(["", "No anomalies detected."])
 
     ws.clear()
+    ws.resize(rows=len(rows), cols=2)
     ws.update(rows, value_input_option="USER_ENTERED")
 
     ws.format("B1", {"textFormat": {"bold": True, "fontSize": 14}})

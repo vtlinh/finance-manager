@@ -136,11 +136,13 @@ def write_spending_sheet(ws: gspread.Worksheet, groups: list[dict], anomaly_cach
     total_row.append(round(grand, 2))
     rows.append(total_row)
 
-    ws.clear()
-    ws.update(rows, value_input_option="USER_ENTERED")
-
     n_cols = len(rows[0])
     last_row = len(rows)
+
+    ws.clear()
+    ws.resize(rows=last_row, cols=n_cols)
+    ws.update(rows, value_input_option="USER_ENTERED")
+
     a1_header = gspread.utils.rowcol_to_a1(1, n_cols)
     a1_total = gspread.utils.rowcol_to_a1(last_row, n_cols)
     ws.format(f"A1:{a1_header}", {"textFormat": {"bold": True}})

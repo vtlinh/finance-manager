@@ -1,9 +1,10 @@
-"""Tests for manager/sheets/summary.py — prompt builder and batch insight generation."""
-from unittest.mock import patch
+"""Tests for manager/sheets/summary.py — prompt builder, batch insight generation, and sheet writing."""
+from unittest.mock import MagicMock, patch
 
+import gspread
 import pytest
 
-from manager.sheets.summary import _build_summary_prompt, generate_all_summary_insights
+from manager.sheets.summary import _build_summary_prompt, generate_all_summary_insights, write_summary_sheet
 
 
 # ── Sample data ────────────────────────────────────────────────────────────────
@@ -185,3 +186,33 @@ def test_generate_all_summary_insights_single_year():
     with patch("manager.sheets.summary.llm_batch_structured", return_value=mock_results):
         out = generate_all_summary_insights(years_data)
     assert out["2024"] == ["Total spending was $500."]
+
+
+# ── write_summary_sheet: resize ───────────────────────────────────────────────
+
+def _summary_ws() -> MagicMock:
+    ws = MagicMock(spec=gspread.Worksheet)
+    ws.id = 1
+    ws.spreadsheet = MagicMock()
+    return ws
+
+
+def test_write_summary_sheet_calls_resize():
+    """ws.resize() must be called once with rows > 0 and cols == 2."""
+    ws = _summary_ws()
+    groups = _groups("2024", months=("01", "02"))
+    write_summary_sheet(ws, groups, [], {}, "2024", ["Insight 1.", "Insight 2."])
+    ws.resize.assert_called_once()
+    kwargs = ws.resize.call_args.kwargs
+    assert kwargs["cols"] == 2
+    assert isinstance(kwargs["rows"], int) and kwargs["rows"] > 0
+
+
+def test_write_summary_sheet_resize_before_update():
+    """resize() must be called after clear() and before update()."""
+    ws = _summary_ws()
+    groups = _groups("2024")
+    write_summary_sheet(ws, groups, [], {}, "2024", [])
+    method_names = [c[0] for c in ws.mock_calls]
+    assert method_names.index("clear") < method_names.index("resize")
+    assert method_names.index("resize") < method_names.index("update")

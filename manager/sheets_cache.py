@@ -88,6 +88,7 @@ def write_cache(tab_name: str, data: dict) -> None:
         else:
             ws.clear()
 
+        ws.resize(rows=max(len(rows), 1), cols=2)
         if rows:
             ws.update(range_name="A1", values=rows)
     except Exception as exc:
