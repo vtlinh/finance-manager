@@ -9,11 +9,15 @@ manager/.merchant_cache.json
 manager/.anomaly_cache.json
 manager/.monarch_transactions
 manager/.monarch_transactions.json
-manager/.debug
+.debug
 
 # Claude Code
 .claude/
 CLAUDE.md
+
+# Render
+render*.yaml
+render*.toml
 
 # Python
 __pycache__/
