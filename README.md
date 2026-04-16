@@ -30,21 +30,18 @@ cp .env.example .env
 Open `.env` and set:
 
 ```
-MONARCH_EMAIL=your@email.com
-MONARCH_PASSWORD=yourpassword
 ANTHROPIC_API_KEY=your-anthropic-api-key
-SPREADSHEET_ID=your-google-spreadsheet-id
 ```
-
-### Monarch Money credentials
-
-Use the same email and password you log in to [monarchmoney.com](https://monarchmoney.com) with. Monarch Money requires MFA — you will be prompted for a code on first run. The session is then cached in `.monarch_session` so you won't be asked again until it expires.
 
 ### Anthropic API key
 
 1. Go to [console.anthropic.com](https://console.anthropic.com)
 2. Navigate to **API Keys** → **Create Key**
 3. Copy the key into your `.env`
+
+### Monarch Money credentials
+
+Enter your Monarch Money email and password when prompted by the CLI, or through the web UI setup wizard. Monarch Money requires MFA — you will be prompted for a code on first run. The session is then cached so you won't be asked again until it expires.
 
 ---
 
@@ -73,7 +70,7 @@ Use the same email and password you log in to [monarchmoney.com](https://monarch
                                           ↑ this part ↑
    ```
 
-3. Paste it as `SPREADSHEET_ID` in your `.env`
+3. Enter it when prompted by the web UI setup wizard or the CLI
 
 ### 3d. Authorize on first run
 
