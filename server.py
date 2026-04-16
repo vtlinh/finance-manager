@@ -337,8 +337,19 @@ def google_auth():
             scopes=_GOOGLE_SCOPES,
             redirect_uri=_callback_url(),
         )
-        auth_url, state = flow.authorization_url(prompt="consent", access_type="offline")
+        import hashlib, secrets
+        code_verifier = secrets.token_urlsafe(96)
+        code_challenge = base64.urlsafe_b64encode(
+            hashlib.sha256(code_verifier.encode()).digest()
+        ).rstrip(b"=").decode()
+        auth_url, state = flow.authorization_url(
+            prompt="consent",
+            access_type="offline",
+            code_challenge=code_challenge,
+            code_challenge_method="S256",
+        )
         session["google_oauth_state"] = state
+        session["google_code_verifier"] = code_verifier
         return jsonify({"status": "redirect", "url": auth_url})
 
     # Local dev fallback: InstalledAppFlow opens a browser on the local machine
@@ -408,11 +419,8 @@ def google_callback():
         redirect_uri=_callback_url(),
     )
     auth_response = request.url.replace("http://", "https://", 1)
-    try:
-        flow.fetch_token(authorization_response=auth_response)
-    except Exception as e:
-        import traceback
-        return f"<pre>OAuth error:\n{traceback.format_exc()}\n\nrequest.url={request.url!r}\nauth_response={auth_response!r}\nstate={state!r}\ncallback_url={_callback_url()!r}</pre>", 500
+    code_verifier = session.pop("google_code_verifier", None)
+    flow.fetch_token(authorization_response=auth_response, code_verifier=code_verifier)
     creds = flow.credentials
     session["google_token"] = _enc(creds.to_json())
     session.pop("google_oauth_state", None)
