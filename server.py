@@ -16,8 +16,14 @@ from pathlib import Path
 from cryptography.fernet import Fernet, InvalidToken
 from dotenv import load_dotenv
 from flask import Flask, Response, jsonify, redirect, request, send_file, session, stream_with_context
+from werkzeug.middleware.proxy_fix import ProxyFix
 
-load_dotenv()
+load_dotenv(override=True)
+
+# Local dev only: allow http:// on OAuth redirect URIs. Render sets APP_URL to
+# the https:// URL, so its presence signals production where HTTPS is required.
+if not os.environ.get("APP_URL"):
+    os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = "1"
 
 BASE_DIR = Path(__file__).parent
 MANAGER_DIR = BASE_DIR / "manager"
@@ -49,6 +55,11 @@ app.secret_key = _SECRET_KEY
 app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(days=365)
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 app.config["SESSION_COOKIE_HTTPONLY"] = True
+
+# Trust X-Forwarded-Proto from Render's proxy so request.url reports the real
+# scheme (https on Render, http on localhost). Without this, Flask sees http
+# behind Render's TLS terminator and OAuth redirect URIs get mangled.
+app.wsgi_app = ProxyFix(app.wsgi_app, x_proto=1, x_host=1)
 
 _run_proc: subprocess.Popen | None = None
 _run_stopped: bool = False
@@ -121,17 +132,31 @@ def _get_monarch_session_bytes(mm) -> str:
         os.unlink(tmp_path)
 
 
+# ── Google Drive helpers ───────────────────────────────────────────────────────
+
+def _untrash_spreadsheet(spreadsheet_id: str, google_token: str) -> bool:
+    """If the spreadsheet is in Drive trash, restore it. Returns True if it was
+    restored, False otherwise (including on any error — best-effort)."""
+    try:
+        from googleapiclient.discovery import build  # type: ignore
+        from manager.login import Google
+        creds = Google.get_credentials(token_json=google_token)
+        drive = build("drive", "v3", credentials=creds, cache_discovery=False)
+        meta = drive.files().get(fileId=spreadsheet_id, fields="trashed").execute()
+        if meta.get("trashed"):
+            drive.files().update(fileId=spreadsheet_id, body={"trashed": False}).execute()
+            return True
+    except Exception:
+        pass
+    return False
+
+
 # ── Google OAuth helpers ───────────────────────────────────────────────────────
 
 _GOOGLE_SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
     "https://www.googleapis.com/auth/drive.file",
 ]
-
-# In-memory holder for the local-dev OAuth result — not user data, just a
-# transient status flag that lives only until the polling endpoint consumes it.
-_local_oauth_result: dict = {"token_json": None, "error": None, "done": False}
-
 
 def _callback_url() -> str:
     base = os.environ.get("APP_URL", request.host_url.rstrip("/"))
@@ -337,13 +362,15 @@ def sheets_save():
 
 @app.route("/api/sheets/check", methods=["POST"])
 def sheets_check():
-    """Verify the stored spreadsheet ID still exists; clear it if not."""
+    """Verify the stored spreadsheet ID still exists; clear it only on a
+    definitive not-found. Auth/network errors are treated as "assume exists"
+    so a stale Google session doesn't make the user re-create their sheet."""
     sid = session.get("spreadsheet_id", "")
     if not sid:
         return jsonify({"status": "missing"})
     google_token = _dec(session.get("google_token", ""))
     if not google_token:
-        return jsonify({"status": "no_token"})
+        return jsonify({"status": "auth_expired", "spreadsheet_id": sid})
     try:
         import gspread  # type: ignore
         from manager.login import Google
@@ -351,9 +378,12 @@ def sheets_check():
         gc = gspread.authorize(creds)
         gc.open_by_key(sid)
         return jsonify({"status": "ok", "spreadsheet_id": sid})
-    except Exception:
+    except gspread.exceptions.SpreadsheetNotFound:
         session.pop("spreadsheet_id", None)
         return jsonify({"status": "not_found"})
+    except Exception:
+        # Token expired, network blip, etc — assume the sheet still exists.
+        return jsonify({"status": "auth_expired", "spreadsheet_id": sid})
 
 
 @app.route("/api/sheets/create", methods=["POST"])
@@ -376,42 +406,28 @@ def sheets_create():
         return jsonify({"status": "error", "message": str(exc)})
 
 
-@app.route("/api/google/auth", methods=["POST"])
-def google_auth():
+def _google_client_creds() -> tuple[str | None, str | None]:
+    """Resolve client_id/client_secret from env vars, falling back to the 'web'
+    section of manager/credentials.json for local development."""
     client_id = os.environ.get("GOOGLE_CLIENT_ID")
     client_secret = os.environ.get("GOOGLE_CLIENT_SECRET")
-
     if client_id and client_secret:
-        # Cloud deployment: web redirect flow — no browser opened on the server
-        from google_auth_oauthlib.flow import Flow  # type: ignore
-        flow = Flow.from_client_config(
-            {"web": {
-                "client_id": client_id,
-                "client_secret": client_secret,
-                "redirect_uris": [_callback_url()],
-                "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-                "token_uri": "https://oauth2.googleapis.com/token",
-            }},
-            scopes=_GOOGLE_SCOPES,
-            redirect_uri=_callback_url(),
-        )
-        import hashlib, secrets
-        code_verifier = secrets.token_urlsafe(96)
-        code_challenge = base64.urlsafe_b64encode(
-            hashlib.sha256(code_verifier.encode()).digest()
-        ).rstrip(b"=").decode()
-        auth_url, state = flow.authorization_url(
-            prompt="consent",
-            access_type="offline",
-            code_challenge=code_challenge,
-            code_challenge_method="S256",
-        )
-        session["google_oauth_state"] = state
-        session["google_code_verifier"] = code_verifier
-        return jsonify({"status": "redirect", "url": auth_url})
+        return client_id, client_secret
+    creds_file = MANAGER_DIR / "credentials.json"
+    if creds_file.exists():
+        data = json.loads(creds_file.read_text())
+        section = data.get("web") or data.get("installed") or {}
+        return section.get("client_id"), section.get("client_secret")
+    return None, None
 
-    # Local dev fallback: InstalledAppFlow opens a browser on the local machine
-    if not (MANAGER_DIR / "credentials.json").exists():
+
+@app.route("/api/google/auth", methods=["POST"])
+def google_auth():
+    """Start the OAuth web redirect flow. Works identically in local dev and on
+    Render — client_id/client_secret come from env vars or credentials.json,
+    and the callback URL is always <host>/api/google/callback."""
+    client_id, client_secret = _google_client_creds()
+    if not (client_id and client_secret):
         return jsonify({
             "status": "error",
             "message": (
@@ -420,44 +436,38 @@ def google_auth():
             ),
         })
 
-    _local_oauth_result.update({"token_json": None, "error": None, "done": False})
-
-    def _run_oauth():
-        try:
-            from google_auth_oauthlib.flow import InstalledAppFlow  # type: ignore
-            flow = InstalledAppFlow.from_client_secrets_file(
-                str(MANAGER_DIR / "credentials.json"), scopes=_GOOGLE_SCOPES,
-            )
-            creds = flow.run_local_server(port=0)
-            _local_oauth_result["token_json"] = creds.to_json()
-            _local_oauth_result["done"] = True
-        except Exception as exc:
-            _local_oauth_result["error"] = str(exc)
-            _local_oauth_result["done"] = True
-
-    threading.Thread(target=_run_oauth, daemon=True).start()
-    return jsonify({"status": "started"})
-
-
-@app.route("/api/google/auth/status")
-def google_auth_status():
-    """Poll endpoint for the local-dev OAuth flow."""
-    if not _local_oauth_result["done"]:
-        return jsonify({"done": False, "error": None})
-    token_json = _local_oauth_result.get("token_json")
-    error = _local_oauth_result.get("error")
-    if token_json:
-        session["google_token"] = _enc(token_json)
-    # Reset so the next auth attempt starts clean
-    _local_oauth_result.update({"token_json": None, "error": None, "done": False})
-    return jsonify({"done": True, "error": error})
+    from google_auth_oauthlib.flow import Flow  # type: ignore
+    flow = Flow.from_client_config(
+        {"web": {
+            "client_id": client_id,
+            "client_secret": client_secret,
+            "redirect_uris": [_callback_url()],
+            "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+            "token_uri": "https://oauth2.googleapis.com/token",
+        }},
+        scopes=_GOOGLE_SCOPES,
+        redirect_uri=_callback_url(),
+    )
+    import hashlib, secrets
+    code_verifier = secrets.token_urlsafe(96)
+    code_challenge = base64.urlsafe_b64encode(
+        hashlib.sha256(code_verifier.encode()).digest()
+    ).rstrip(b"=").decode()
+    auth_url, state = flow.authorization_url(
+        prompt="consent",
+        access_type="offline",
+        code_challenge=code_challenge,
+        code_challenge_method="S256",
+    )
+    session["google_oauth_state"] = state
+    session["google_code_verifier"] = code_verifier
+    return jsonify({"status": "redirect", "url": auth_url})
 
 
 @app.route("/api/google/callback")
 def google_callback():
-    """OAuth2 callback for cloud deployment redirect flow."""
-    client_id = os.environ.get("GOOGLE_CLIENT_ID")
-    client_secret = os.environ.get("GOOGLE_CLIENT_SECRET")
+    """OAuth2 callback — used for both local dev and Render."""
+    client_id, client_secret = _google_client_creds()
     state = session.get("google_oauth_state")
 
     if not state or not client_id or not client_secret:
@@ -476,9 +486,8 @@ def google_callback():
         state=state,
         redirect_uri=_callback_url(),
     )
-    auth_response = request.url.replace("http://", "https://", 1)
     code_verifier = session.pop("google_code_verifier", None)
-    flow.fetch_token(authorization_response=auth_response, code_verifier=code_verifier)
+    flow.fetch_token(authorization_response=request.url, code_verifier=code_verifier)
     creds = flow.credentials
     session["google_token"] = _enc(creds.to_json())
     session.pop("google_oauth_state", None)
@@ -519,6 +528,10 @@ def api_run():
         config["SPREADSHEET_ID"] = session["spreadsheet_id"]
 
     config["USE_BATCH_LLM"] = "1"
+
+    anthropic_key = os.environ.get("ANTHROPIC_API_KEY", "")
+    if anthropic_key:
+        config["ANTHROPIC_API_KEY"] = anthropic_key
 
     cfg_fd, cfg_path = tempfile.mkstemp(suffix=".json")
     with os.fdopen(cfg_fd, "w", encoding="utf-8") as cfg_f:
@@ -577,6 +590,12 @@ def api_run():
         if _run_stopped:
             yield f"data: {json.dumps({'type': 'stopped'})}\n\n"
         elif proc.returncode == 0:
+            # Final check: if the spreadsheet ended up in Drive trash (e.g. user
+            # deleted it during the run), restore it so the "Open Spreadsheet"
+            # link isn't broken. Best-effort — silent on failure.
+            google_token = _dec(session.get("google_token", ""))
+            if sid and google_token:
+                _untrash_spreadsheet(sid, google_token)
             url = f"https://docs.google.com/spreadsheets/d/{sid}"
             yield f"data: {json.dumps({'type': 'done', 'url': url})}\n\n"
         else:

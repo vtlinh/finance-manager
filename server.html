@@ -321,6 +321,7 @@ let monarchMode = "login";          // "login" | "csv"
 let runEventSource = null;
 let monarchModeUserSet = false;     // true once the user has manually picked a tab
 let sheetMode   = null; // "existing" | "create" — null means auto-detect from status
+let sheetCheckPromise = null; // in-flight /api/sheets/check started while user is on Monarch step
 
 // ── Bootstrap ─────────────────────────────────────────────────────────────────
 async function init() {
@@ -355,11 +356,15 @@ function showLoadingCard() {
     </div>`;
 }
 // Transition from Monarch step → Spreadsheet step:
-// shows spinner immediately, does the sheet check, then renders step 2 synchronously.
+// shows spinner immediately, awaits the precheck kicked off on the Monarch step,
+// then renders step 2. If the precheck already resolved, there's no wait.
 async function transitionToSpreadsheet() {
   showLoadingCard();
   if (sheetMode === null && status.spreadsheet_id) {
-    const check = await post("/api/sheets/check", {});
+    const check = await (sheetCheckPromise || post("/api/sheets/check", {}));
+    sheetCheckPromise = null;
+    // Only clear the stored ID on a definitive not-found. "auth_expired" means
+    // the Google session is stale — assume the sheet still exists.
     if (check.status === "not_found") status.spreadsheet_id = "";
   }
   step++;
@@ -490,6 +495,13 @@ function renderMonarch() {
   document.getElementById("mm-mfa")?.addEventListener("keydown", e => {
     if (e.key === "Enter") submitMonarch();
   });
+
+  // Start the spreadsheet-existence check now, in parallel with the user filling
+  // out Monarch credentials. By the time they click Next, the result is usually
+  // ready — no extra wait. Only kick off once per Monarch render.
+  if (!sheetCheckPromise && sheetMode === null && status.spreadsheet_id) {
+    sheetCheckPromise = post("/api/sheets/check", {});
+  }
 }
 
 function setMonarchMode(mode) {
@@ -676,15 +688,8 @@ function startGoogleAuth(pillId, btnId, onDone) {
       throw new Error(res.message);
     }
 
-    const isRedirect = res.status === "redirect";
-    let popup = null;
-
-    if (isRedirect) {
-      popup = window.open(res.url, "google_auth", "width=600,height=700,top=100,left=100");
-      if (pill) { pill.className = "auth-pill waiting"; pill.innerHTML = `<span class="spin dark"></span> Complete authorization in the popup, then return here.`; }
-    } else {
-      if (pill) { pill.className = "auth-pill waiting"; pill.innerHTML = `<span class="spin dark"></span> A browser tab opened — authorize there, then return here.`; }
-    }
+    const popup = window.open(res.url, "google_auth", "width=600,height=700,top=100,left=100");
+    if (pill) { pill.className = "auth-pill waiting"; pill.innerHTML = `<span class="spin dark"></span> Complete authorization in the popup, then return here.`; }
     if (btn) btn.disabled = true;
 
     return new Promise((resolve, reject) => {
@@ -700,43 +705,28 @@ function startGoogleAuth(pillId, btnId, onDone) {
         resolve();
       }
 
-      if (isRedirect) {
-        // Listen for postMessage from the popup callback page
-        window.addEventListener("message", e => {
-          if (e.origin === location.origin && e.data === "google_auth_done") {
-            clearInterval(googlePollTimer);
-            // Small delay so the cookie is committed before we poll
-            setTimeout(() => _onAuthDone(), 300);
-          }
-        }, { once: true });
+      // Listen for postMessage from the popup callback page
+      window.addEventListener("message", e => {
+        if (e.origin === location.origin && e.data === "google_auth_done") {
+          clearInterval(googlePollTimer);
+          // Small delay so the cookie is committed before we poll
+          setTimeout(() => _onAuthDone(), 300);
+        }
+      }, { once: true });
 
-        // Fallback: poll /api/status in case postMessage is blocked
-        googlePollTimer = setInterval(async () => {
-          const s = await api("/api/status");
-          if (s.google_token) {
-            if (popup && !popup.closed) popup.close();
-            _onAuthDone();
-          } else if (popup && popup.closed) {
-            clearInterval(googlePollTimer);
-            if (pill) { pill.style.cssText = "display:flex; background:#fef2f2; border:1px solid #fecaca; color:#b91c1c"; pill.textContent = "Authorization cancelled. Try again."; }
-            if (btn) btn.disabled = false;
-            reject(new Error("Authorization cancelled."));
-          }
-        }, 1500);
-      } else {
-        // Local dev (InstalledAppFlow): poll /api/google/auth/status
-        googlePollTimer = setInterval(async () => {
-          const s = await api("/api/google/auth/status");
-          if (s.done) {
-            _onAuthDone();
-          } else if (s.error) {
-            clearInterval(googlePollTimer);
-            if (pill) { pill.style.cssText = "display:flex; background:#fef2f2; border:1px solid #fecaca; color:#b91c1c"; pill.textContent = s.error; }
-            if (btn) btn.disabled = false;
-            reject(new Error(s.error));
-          }
-        }, 1500);
-      }
+      // Fallback: poll /api/status in case postMessage is blocked (also detects popup close)
+      googlePollTimer = setInterval(async () => {
+        const s = await api("/api/status");
+        if (s.google_token) {
+          if (popup && !popup.closed) popup.close();
+          _onAuthDone();
+        } else if (popup && popup.closed) {
+          clearInterval(googlePollTimer);
+          if (pill) { pill.style.cssText = "display:flex; background:#fef2f2; border:1px solid #fecaca; color:#b91c1c"; pill.textContent = "Authorization cancelled. Try again."; }
+          if (btn) btn.disabled = false;
+          reject(new Error("Authorization cancelled."));
+        }
+      }, 1500);
     });
   });
 }

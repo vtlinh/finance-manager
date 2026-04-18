@@ -27,7 +27,7 @@ from .categorize import categorize_with_llm
 from .sheets import export
 from .transactions import filter_transactions, get_transactions, group_by_month_merchant
 
-load_dotenv()
+load_dotenv(override=True)
 
 
 async def main() -> None:

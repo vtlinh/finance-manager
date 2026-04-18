@@ -57,8 +57,9 @@ Enter your Monarch Money email and password when prompted by the CLI, or through
 
 1. Go to **APIs & Services → Credentials → Create Credentials → OAuth client ID**
 2. If prompted, configure the consent screen: choose **External**, enter any app name, and save
-3. For application type, select **Desktop app** and click **Create**
-4. Click **Download JSON** and save the file as `credentials.json` in this folder
+3. For application type, select **Web application**
+4. Add an authorized redirect URI: `http://localhost:5000/api/google/callback` (and `https://<your-domain>/api/google/callback` if you deploy the web UI)
+5. Click **Create**, then **Download JSON** and save the file as `manager/credentials.json`
 
 ### 3c. Create a Google Sheet and get its ID
 

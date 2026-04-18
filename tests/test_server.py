@@ -228,6 +228,75 @@ def test_sheets_create_success(client):
         assert sess["spreadsheet_id"] == "new_sheet_id"
 
 
+# ── POST /api/sheets/check ─────────────────────────────────────────────────────
+
+def test_sheets_check_missing_id(client):
+    resp = client.post("/api/sheets/check", json={})
+    data = resp.get_json()
+    assert data["status"] == "missing"
+
+
+def test_sheets_check_no_token_returns_auth_expired(client):
+    """Without a Google token, assume the sheet exists rather than clearing the
+    stored ID — the user's Google session may simply be stale."""
+    with client.session_transaction() as sess:
+        sess["spreadsheet_id"] = "sheet123"
+    resp = client.post("/api/sheets/check", json={})
+    data = resp.get_json()
+    assert data["status"] == "auth_expired"
+    assert data["spreadsheet_id"] == "sheet123"
+    with client.session_transaction() as sess:
+        assert sess.get("spreadsheet_id") == "sheet123"  # NOT cleared
+
+
+def test_sheets_check_ok(client):
+    with client.session_transaction() as sess:
+        sess["spreadsheet_id"] = "sheet123"
+        sess["google_token"] = _enc('{"token": "fake"}')
+    mock_gc = MagicMock()
+    mock_gc.open_by_key.return_value = MagicMock()
+    with patch("gspread.authorize", return_value=mock_gc), \
+         patch("manager.login.Google.get_credentials", return_value=MagicMock()):
+        resp = client.post("/api/sheets/check", json={})
+    data = resp.get_json()
+    assert data["status"] == "ok"
+    assert data["spreadsheet_id"] == "sheet123"
+
+
+def test_sheets_check_not_found_clears_id(client):
+    """A gspread SpreadsheetNotFound is the one case that should clear the ID."""
+    import gspread
+    with client.session_transaction() as sess:
+        sess["spreadsheet_id"] = "sheet123"
+        sess["google_token"] = _enc('{"token": "fake"}')
+    mock_gc = MagicMock()
+    mock_gc.open_by_key.side_effect = gspread.exceptions.SpreadsheetNotFound
+    with patch("gspread.authorize", return_value=mock_gc), \
+         patch("manager.login.Google.get_credentials", return_value=MagicMock()):
+        resp = client.post("/api/sheets/check", json={})
+    data = resp.get_json()
+    assert data["status"] == "not_found"
+    with client.session_transaction() as sess:
+        assert "spreadsheet_id" not in sess
+
+
+def test_sheets_check_other_error_is_auth_expired(client):
+    """Network/token errors should NOT clear the ID."""
+    with client.session_transaction() as sess:
+        sess["spreadsheet_id"] = "sheet123"
+        sess["google_token"] = _enc('{"token": "fake"}')
+    mock_gc = MagicMock()
+    mock_gc.open_by_key.side_effect = RuntimeError("token expired")
+    with patch("gspread.authorize", return_value=mock_gc), \
+         patch("manager.login.Google.get_credentials", return_value=MagicMock()):
+        resp = client.post("/api/sheets/check", json={})
+    data = resp.get_json()
+    assert data["status"] == "auth_expired"
+    assert data["spreadsheet_id"] == "sheet123"
+    with client.session_transaction() as sess:
+        assert sess.get("spreadsheet_id") == "sheet123"
+
+
 # ── POST /api/google/auth ──────────────────────────────────────────────────────
 
 def test_google_auth_no_credentials_no_file(client, tmp_path, monkeypatch):
@@ -241,6 +310,23 @@ def test_google_auth_no_credentials_no_file(client, tmp_path, monkeypatch):
     assert "GOOGLE_CLIENT_ID" in data["message"] or "credentials.json" in data["message"]
 
 
+def test_google_auth_reads_credentials_json_when_env_missing(client, tmp_path, monkeypatch):
+    """Local dev: when env vars are absent, read client creds from manager/credentials.json."""
+    monkeypatch.delenv("GOOGLE_CLIENT_ID", raising=False)
+    monkeypatch.delenv("GOOGLE_CLIENT_SECRET", raising=False)
+    creds_file = tmp_path / "credentials.json"
+    creds_file.write_text(json.dumps({
+        "web": {"client_id": "file_cid", "client_secret": "file_csec"}
+    }))
+    monkeypatch.setattr(server, "MANAGER_DIR", tmp_path)
+    mock_flow = MagicMock()
+    mock_flow.authorization_url.return_value = ("https://accounts.google.com/auth", "state123")
+    with patch("google_auth_oauthlib.flow.Flow.from_client_config", return_value=mock_flow):
+        resp = client.post("/api/google/auth")
+    data = resp.get_json()
+    assert data["status"] == "redirect"
+
+
 def test_google_auth_cloud_returns_redirect(client, monkeypatch):
     monkeypatch.setenv("GOOGLE_CLIENT_ID", "client_id")
     monkeypatch.setenv("GOOGLE_CLIENT_SECRET", "client_secret")
@@ -251,36 +337,6 @@ def test_google_auth_cloud_returns_redirect(client, monkeypatch):
     data = resp.get_json()
     assert data["status"] == "redirect"
     assert "url" in data
-
-
-# ── GET /api/google/auth/status ───────────────────────────────────────────────
-
-def test_google_auth_status_not_done(client):
-    server._local_oauth_result.update({"token_json": None, "error": None, "done": False})
-    resp = client.get("/api/google/auth/status")
-    data = resp.get_json()
-    assert data["done"] is False
-    assert data["error"] is None
-
-
-def test_google_auth_status_done_with_token(client):
-    server._local_oauth_result.update({"token_json": '{"token":"abc"}', "error": None, "done": True})
-    resp = client.get("/api/google/auth/status")
-    data = resp.get_json()
-    assert data["done"] is True
-    assert data["error"] is None
-    with client.session_transaction() as sess:
-        assert sess.get("google_token")
-    # Result should be reset after consumption
-    assert server._local_oauth_result["done"] is False
-
-
-def test_google_auth_status_done_with_error(client):
-    server._local_oauth_result.update({"token_json": None, "error": "Access denied", "done": True})
-    resp = client.get("/api/google/auth/status")
-    data = resp.get_json()
-    assert data["done"] is True
-    assert data["error"] == "Access denied"
 
 
 # ── GET /api/google/callback ───────────────────────────────────────────────────

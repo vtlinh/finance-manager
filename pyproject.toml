@@ -6,6 +6,7 @@ dependencies = [
     "anthropic",
     "cryptography",
     "flask",
+    "google-api-python-client",
     "google-auth-oauthlib",
     "gspread",
     "gunicorn; sys_platform != 'win32'",
