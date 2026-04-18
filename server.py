@@ -236,41 +236,6 @@ def monarch_login():
         session["monarch_session"] = _enc(_get_monarch_session_bytes(mm))
         session["monarch_email"] = email
 
-    if result["status"] == "mfa_required":
-        session["monarch_mfa_email"] = email
-        session["monarch_mfa_password"] = _enc(password)
-
-    return jsonify(result)
-
-
-@app.route("/api/monarch/mfa", methods=["POST"])
-def monarch_mfa():
-    from monarchmoney import MonarchMoney  # type: ignore
-
-    code     = (request.json.get("code") or "").strip() or None
-    email    = session.get("monarch_mfa_email")
-    password = _dec(session.get("monarch_mfa_password", ""))
-
-    if not email or not code:
-        return jsonify({"status": "error", "message": "No pending MFA session."})
-
-    async def _submit():
-        mm = MonarchMoney()
-        try:
-            await mm.multi_factor_authenticate(email, password, code)
-            return {"status": "ok", "mm": mm}
-        except Exception as exc:
-            return {"status": "error", "message": str(exc)}
-
-    result = run_async(_submit())
-    mm = result.pop("mm", None)
-
-    if result["status"] == "ok" and mm:
-        session["monarch_session"] = _enc(_get_monarch_session_bytes(mm))
-        session["monarch_email"] = email
-        session.pop("monarch_mfa_email", None)
-        session.pop("monarch_mfa_password", None)
-
     return jsonify(result)
 
 

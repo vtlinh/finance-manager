@@ -102,43 +102,32 @@ def test_monarch_login_success_stores_session(client):
         assert sess.get("monarch_session")
 
 
-# ── POST /api/monarch/mfa ──────────────────────────────────────────────────────
-
-def test_monarch_mfa_no_pending_session(client):
-    resp = client.post("/api/monarch/mfa", json={"code": "123456"})
-    data = resp.get_json()
-    assert data["status"] == "error"
-    assert "No pending MFA" in data["message"]
-
-
-def test_monarch_mfa_wrong_code(client):
-    with client.session_transaction() as sess:
-        sess["monarch_mfa_email"] = "user@example.com"
-        sess["monarch_mfa_password"] = _enc("pass")
+def test_monarch_login_with_mfa_upfront_calls_multi_factor_authenticate(client):
+    """When the client sends MFA with the initial login, the server should skip
+    mm.login() and call mm.multi_factor_authenticate() directly."""
     mock_mm = MagicMock()
-    mock_mm.multi_factor_authenticate = AsyncMock(side_effect=Exception("Invalid MFA code"))
-    with patch("monarchmoney.MonarchMoney", return_value=mock_mm):
-        resp = client.post("/api/monarch/mfa", json={"code": "000000"})
-    data = resp.get_json()
-    assert data["status"] == "error"
-    assert "Invalid MFA code" in data["message"]
-
-
-def test_monarch_mfa_success(client):
-    with client.session_transaction() as sess:
-        sess["monarch_mfa_email"] = "user@example.com"
-        sess["monarch_mfa_password"] = _enc("pass")
-    mock_mm = MagicMock()
+    mock_mm.login = AsyncMock(return_value=None)
     mock_mm.multi_factor_authenticate = AsyncMock(return_value=None)
     with patch("monarchmoney.MonarchMoney", return_value=mock_mm), \
          patch("server._get_monarch_session_bytes", return_value="base64session"):
-        resp = client.post("/api/monarch/mfa", json={"code": "123456"})
+        resp = client.post("/api/monarch/login",
+                           json={"email": "user@example.com", "password": "pass", "mfa": "123456"})
     data = resp.get_json()
     assert data["status"] == "ok"
-    with client.session_transaction() as sess:
-        assert sess.get("monarch_email") == "user@example.com"
-        assert "monarch_mfa_email" not in sess
-        assert "monarch_mfa_password" not in sess
+    mock_mm.multi_factor_authenticate.assert_awaited_once_with("user@example.com", "pass", "123456")
+    mock_mm.login.assert_not_awaited()
+
+
+def test_monarch_login_with_mfa_upfront_error(client):
+    """MFA failures in the upfront path return an error, not a 500."""
+    mock_mm = MagicMock()
+    mock_mm.multi_factor_authenticate = AsyncMock(side_effect=Exception("Invalid MFA code"))
+    with patch("monarchmoney.MonarchMoney", return_value=mock_mm):
+        resp = client.post("/api/monarch/login",
+                           json={"email": "user@example.com", "password": "pass", "mfa": "000000"})
+    data = resp.get_json()
+    assert data["status"] == "error"
+    assert "Invalid MFA code" in data["message"]
 
 
 # ── POST /api/monarch/validate ─────────────────────────────────────────────────

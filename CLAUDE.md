@@ -11,6 +11,17 @@ uv run finance-run         # Run analysis pipeline from CLI
 cp .env.example .env       # Set up credentials
 ```
 
+### Bootstrapping the server
+
+Before starting `uv run finance-server`, always check for stale listeners on port 5000 and kill them **one by one by PID** — `pkill -f finance-server` does **not** reliably match on Windows, so stale workers accumulate and the browser may hit an old process without your latest code.
+
+```bash
+netstat -ano | grep "LISTENING" | grep ":5000"        # list stale PIDs
+taskkill //F //PID <pid>                              # kill each one explicitly
+```
+
+Verify only one listener remains before running the server. Also set `PYTHONUNBUFFERED=1` when redirecting output to a file so `print()` shows up immediately.
+
 ## Workflow
 
 After completing any code change:
@@ -116,3 +127,4 @@ After pushing to GitHub, re-read this file and compact the Change Log: merge clo
 - 2026-04-16: Run page: back button always returns to Spreadsheet; Stop/Retry/Open Spreadsheet buttons; step-3 checkmark on done
 - 2026-04-16: Batch all year-summary LLM prompts in one call; hide cache tabs instead of deleting; remove MONARCH_EMAIL/PASSWORD/SPREADSHEET_ID from docs; track CLAUDE.md/.claude/ in git
 - 2026-04-16: Fix Monarch 429 login errors by replacing asyncio.run() with persistent background event loop (run_async); add show/hide password toggle; send MFA upfront via login endpoint
+- 2026-04-17: Document server bootstrap hygiene — check port 5000 for stale listeners and kill by PID (pkill unreliable on Windows); use PYTHONUNBUFFERED=1 for live print output
